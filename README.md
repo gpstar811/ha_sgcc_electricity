@@ -116,9 +116,26 @@ docker compose up -d
 | 来源 | 地址 |
 |------|------|
 | GHCR（推荐） | `ghcr.io/poiig/ha_sgcc_electricity:latest` |
+| GHCR 镜像加速（国内） | `ghcr.nju.edu.cn/poiig/ha_sgcc_electricity:latest` |
 | Docker Hub | `poiigzhao/ha_sgcc_electricity:latest` |
+| Docker Hub 镜像加速（国内） | `docker.1ms.run/poiigzhao/ha_sgcc_electricity:latest` |
 
 支持架构：`linux/amd64`、`linux/arm64`
+
+## Home Assistant Add-on 安装
+
+适用于 Home Assistant OS / Supervised 用户：
+
+1. 进入 `设置` → `加载项` → `加载项商店`
+2. 右上角 `...` → `仓库`，添加：
+
+```text
+https://github.com/Poiig/ha_sgcc_electricity
+```
+
+3. 找到 `国家电网电费数据获取` 并安装
+4. 在 `配置` 页面填写 95598 账号、密码和 Home Assistant 访问令牌
+5. 启动 add-on，查看日志确认运行状态
 
 ## 本地运行
 

@@ -21,7 +21,6 @@ assets/
 ha_addons_doc/
 icon.png
 logo.png
-repository.yaml
 Dockerfile-for-github-action
 
 translations

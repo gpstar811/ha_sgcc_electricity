@@ -1,7 +1,13 @@
 services:
   sgcc_electricity_app:
+    # GHCR 镜像（推荐）
     image: ghcr.io/poiig/ha_sgcc_electricity:latest
-    # 如果已配置 Docker Hub，可改为: poiigzhao/ha_sgcc_electricity:latest
+    # GHCR 南京大学镜像加速（国内推荐）
+    # image: ghcr.nju.edu.cn/poiig/ha_sgcc_electricity:latest
+    # Docker Hub 镜像
+    # image: poiigzhao/ha_sgcc_electricity:latest
+    # Docker Hub 镜像加速
+    # image: docker.1ms.run/poiigzhao/ha_sgcc_electricity:latest
     container_name: sgcc_electricity
     env_file:
       - .env
