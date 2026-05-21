@@ -92,6 +92,71 @@ class WeworkNotify(typ.NamedTuple):
         return ok
 
 
+class WeworkSummaryNotify(typ.NamedTuple):
+    """企业微信推送户号数据汇总（拉取成功后）。"""
+
+    def __call__(self, records: list) -> bool:
+        webhook = os.getenv("WEWORK_WEBHOOK_URL", "").strip()
+        if not webhook or not records:
+            return False
+
+        now = __import__("datetime").datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        lines = [
+            "## 国家电网数据同步完成",
+            f"> 同步时间：<font color=\"comment\">{now}</font>",
+            f"> 成功户号：<font color=\"info\">{len(records)}</font> 个",
+            "",
+        ]
+        for item in records:
+            user_id = item.get("user_id", "")
+            user_name = item.get("user_name") or user_id
+            balance = item.get("balance")
+            balance_text = f"{balance} 元" if balance is not None else "—"
+            balance_color = "warning" if balance is not None and balance < _balance_threshold() else "info"
+            lines.extend([
+                f"### {user_name}",
+                f"> 户号：<font color=\"comment\">{user_id}</font>",
+                f"> 余额：<font color=\"{balance_color}\">{balance_text}</font>",
+            ])
+            if item.get("last_daily_date") and item.get("last_daily_usage") is not None:
+                lines.append(
+                    f"> 最近用电：{item['last_daily_usage']} kWh ({item['last_daily_date']})"
+                )
+            if item.get("month_usage") is not None or item.get("month_charge") is not None:
+                lines.append(
+                    f"> 本月：{item.get('month_usage', '—')} kWh / {item.get('month_charge', '—')} 元"
+                )
+            if item.get("yearly_usage") is not None or item.get("yearly_charge") is not None:
+                lines.append(
+                    f"> 年度：{item.get('yearly_usage', '—')} kWh / {item.get('yearly_charge', '—')} 元"
+                )
+            enhanced = item.get("enhanced_balance") or {}
+            if enhanced.get("amount_due") is not None:
+                lines.append(f"> 应交金额：{enhanced['amount_due']} 元")
+            lines.append("")
+
+        content = "\n".join(lines).strip()
+        payload = {"msgtype": "markdown", "markdown": {"content": content}}
+        ok = _post_wework(webhook, payload)
+        if ok:
+            logging.info("已发送企业微信数据汇总，共 %s 个户号", len(records))
+        return ok
+
+
+def push_fetch_summary(records: list) -> bool:
+    """拉取成功后推送汇总（仅 wework 且 WEWORK_PUSH_SUMMARY 启用）。"""
+    if not records:
+        return False
+    enabled = os.getenv("WEWORK_PUSH_SUMMARY", "true").lower() in ("true", "1", "yes")
+    push_type = os.getenv("PUSH_TYPE", "none").strip().lower()
+    if not enabled or push_type != "wework":
+        return False
+    if not os.getenv("WEWORK_WEBHOOK_URL", "").strip():
+        logging.warning("WEWORK_WEBHOOK_URL 未配置，跳过汇总推送")
+        return False
+    return WeworkSummaryNotify()(records)
+
+
 class UrlLoginQrCodeNotify(typ.NamedTuple):
 
     def __call__(self, qrcode) -> bool:
@@ -126,10 +191,13 @@ class WeworkQrCodeNotify(typ.NamedTuple):
 
 
 def get_qrcode_notifier():
-    """按配置选择二维码推送方式。"""
+    """按配置选择二维码推送方式。PUSH_TYPE=wework 时优先走企微 webhook。"""
     push_type = os.getenv("PUSH_TYPE", "none").lower()
+    wework = os.getenv("WEWORK_WEBHOOK_URL", "").strip()
+    if push_type == "wework" and wework:
+        return WeworkQrCodeNotify()
     if os.getenv("PUSH_QRCODE_URL", "").strip():
         return UrlLoginQrCodeNotify()
-    if push_type == "wework" and os.getenv("WEWORK_WEBHOOK_URL", "").strip():
+    if wework:
         return WeworkQrCodeNotify()
     return None

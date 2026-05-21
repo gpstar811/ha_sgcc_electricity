@@ -19,10 +19,8 @@ if sys.platform == 'win32':
 
 def main():
     global RETRY_TIMES_LIMIT
-    if 'PYTHON_IN_DOCKER' not in os.environ: 
-        # 读取 .env 文件
-        import dotenv
-        dotenv.load_dotenv(verbose=True)
+    if 'PYTHON_IN_DOCKER' not in os.environ:
+        load_project_env()
     if os.path.isfile('/data/options.json'):
         with open('/data/options.json') as f:
             options = json.load(f)

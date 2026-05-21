@@ -33,9 +33,9 @@ import numpy as np
 class DataFetcher:
 
     def __init__(self, username: str, password: str):
-        if 'PYTHON_IN_DOCKER' not in os.environ: 
-            import dotenv
-            dotenv.load_dotenv(verbose=True)
+        if 'PYTHON_IN_DOCKER' not in os.environ:
+            from const import load_project_env
+            load_project_env()
         self._username = username
         self._password = password
 
@@ -548,7 +548,13 @@ class DataFetcher:
             from notify import get_qrcode_notifier
             notifier = get_qrcode_notifier()
             if notifier:
-                notifier(img_screenshot)
+                ok = notifier(img_screenshot)
+                if ok:
+                    logging.info("登录二维码已推送到通知渠道")
+                else:
+                    logging.warning("登录二维码推送失败，请检查 WEWORK_WEBHOOK_URL 或 PUSH_QRCODE_URL 配置")
+            else:
+                logging.info("未配置二维码推送渠道 (PUSH_TYPE=wework 或 PUSH_QRCODE_URL)")
         except Exception as e:
             logging.warning(f"二维码推送失败 (不影响扫码登录): {e}")
         logging.info(f"等待扫码登录, 最长等待 {self.QR_CODE_LOGIN_WAIT_COUNT * self.QR_CODE_LOGIN_WAIT_TIME_INTERVAL_UNIT} 秒...")
@@ -625,6 +631,7 @@ class DataFetcher:
         logging.info(f"共获取到 {len(user_id_list)} 个用户: {user_id_list}, 其中 {self.IGNORE_USER_ID} 将被忽略")
         time.sleep(self._step_wait)
 
+        fetch_results = []
 
         for userid_index, user_id in enumerate(user_id_list):           
             logging.info(f"===== 开始处理第 {userid_index + 1}/{len(user_id_list)} 个用户: {user_id} =====")
@@ -648,6 +655,18 @@ class DataFetcher:
                 logging.info(f"用户 [{user_id}] 数据获取完成: 余额={balance}CNY, 最近日用电={last_daily_usage}kWh({last_daily_date}), "
                              f"年度用电={yearly_usage}kWh, 年度电费={yearly_charge}CNY, 月用电={month_usage}kWh, 月电费={month_charge}CNY")
                 updator.update_one_userid(user_id, balance, last_daily_date, last_daily_usage, yearly_charge, yearly_usage, month_charge, month_usage, tou_data=tou_data, enhanced_balance=enhanced_balance)
+                fetch_results.append({
+                    "user_id": user_id,
+                    "user_name": self._user_name_map.get(user_id, user_id),
+                    "balance": balance,
+                    "last_daily_date": last_daily_date,
+                    "last_daily_usage": last_daily_usage,
+                    "yearly_charge": yearly_charge,
+                    "yearly_usage": yearly_usage,
+                    "month_charge": month_charge,
+                    "month_usage": month_usage,
+                    "enhanced_balance": enhanced_balance,
+                })
                 time.sleep(self._step_wait)
             except Exception as e:
                 if (userid_index != len(user_id_list)):
@@ -658,6 +677,11 @@ class DataFetcher:
                 continue
 
         logging.info("所有用户数据处理完成, 关闭浏览器")
+        try:
+            from notify import push_fetch_summary
+            push_fetch_summary(fetch_results)
+        except Exception as exc:
+            logging.warning("数据汇总推送失败 (非致命): %s", exc)
         driver.quit()
 
 

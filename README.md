@@ -123,6 +123,7 @@ Docker Compose 方式通过 `.env` 文件配置，完整配置项见 `example.en
 | `RETRY_WAIT_TIME_OFFSET_UNIT` | 10 | 页面操作等待秒数（2-30） |
 | `PUSH_TYPE` | none | 通知方式（none / pushplus / urlpush / wework） |
 | `WEWORK_WEBHOOK_URL` | — | 企业微信群机器人 webhook（`PUSH_TYPE=wework` 时必填） |
+| `WEWORK_PUSH_SUMMARY` | `true` | 拉取成功后推送户号数据汇总到企微 |
 | `BALANCE` | 100 | 余额低于此值时通知（元） |
 
 ---

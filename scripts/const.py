@@ -37,3 +37,12 @@ def get_data_dir() -> str:
     os.makedirs(data_dir, exist_ok=True)
     return data_dir
 
+
+def load_project_env() -> None:
+    """加载项目根目录 .env（本地开发时 cwd 可能在 scripts/）。"""
+    if 'PYTHON_IN_DOCKER' in os.environ:
+        return
+    import dotenv
+    env_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env')
+    dotenv.load_dotenv(env_path, verbose=True)
+
