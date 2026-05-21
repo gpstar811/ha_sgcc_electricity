@@ -15,7 +15,7 @@ class SensorUpdator:
         self.base_url = HASS_URL[:-1] if HASS_URL.endswith("/") else HASS_URL
         self.token = HASS_TOKEN
         self._init_balance_notify()
-        
+
     def _init_balance_notify(self):
         push_type = os.getenv("PUSH_TYPE", "None").strip().lower()
         if push_type == "pushplus":
@@ -29,11 +29,28 @@ class SensorUpdator:
             self.balance_notify = WeworkNotify()
         else:
             self.balance_notify = None
-        
 
-    def update_one_userid(self, user_id: str, balance: float, last_daily_date: str, last_daily_usage: float, yearly_charge: float, yearly_usage: float, month_charge: float, month_usage: float, tou_data: dict = None, enhanced_balance: dict = None, user_name: str = "", notify=True):
-        logging.info(f"[{user_id}] 开始更新 Home Assistant 传感器数据...")
-        self._save_to_cache(user_id, balance, last_daily_date, last_daily_usage, yearly_charge, yearly_usage, month_charge, month_usage, tou_data, enhanced_balance, user_name=user_name)
+    @staticmethod
+    def _sensor_name(base: str, postfix: str) -> str:
+        return base + postfix
+
+    @staticmethod
+    def _sensor_label(base: str) -> str:
+        return SENSOR_LABELS.get(base, base)
+
+    def _log_skip(self, base: str, postfix: str):
+        name = self._sensor_name(base, postfix)
+        label = self._sensor_label(base)
+        logging.info(f"跳过更新 {label} 【{name}】，状态一致")
+
+    def _log_updated(self, base: str, postfix: str, value, unit: str):
+        name = self._sensor_name(base, postfix)
+        label = self._sensor_label(base)
+        logging.info(f"{label} 【{name}】 已更新: {value} {unit}")
+
+    def update_one_userid(self, user_id: str, balance: float, last_daily_date: str, last_daily_usage: float, yearly_charge: float, yearly_usage: float, month_charge: float, month_usage: float, tou_data: dict = None, enhanced_balance: dict = None, step_data: dict = None, user_name: str = "", notify=True):
+        logging.info(f"[{user_id}] 开始更新 Home Assistant 数据...")
+        self._save_to_cache(user_id, balance, last_daily_date, last_daily_usage, yearly_charge, yearly_usage, month_charge, month_usage, tou_data, enhanced_balance, step_data=step_data, user_name=user_name)
         postfix = f"_{user_id[-4:]}"
         if balance is not None:
             if notify and self.balance_notify is not None:
@@ -50,21 +67,22 @@ class SensorUpdator:
         if month_charge is not None:
             self.update_month_data(postfix, month_charge)
 
-        # 分时电量传感器
         if tou_data:
             self._update_tou_sensors(postfix, tou_data)
 
-        # 应交金额传感器
+        if step_data:
+            self._update_step_sensors(postfix, step_data)
+
         if enhanced_balance and enhanced_balance.get("amount_due") is not None:
             self.update_prepay_balance(postfix, enhanced_balance["amount_due"])
 
-        logging.info(f"[{user_id}] Home Assistant 传感器数据更新完成!")
+        logging.info(f"[{user_id}] Home Assistant 数据更新完成")
 
     def _get_cache_file(self):
         from const import get_data_dir
         return os.path.join(get_data_dir(), 'sgcc_cache.json')
 
-    def _save_to_cache(self, user_id, balance, last_daily_date, last_daily_usage, yearly_charge, yearly_usage, month_charge, month_usage, tou_data=None, enhanced_balance=None, user_name=""):
+    def _save_to_cache(self, user_id, balance, last_daily_date, last_daily_usage, yearly_charge, yearly_usage, month_charge, month_usage, tou_data=None, enhanced_balance=None, step_data=None, user_name=""):
         cache_file = self._get_cache_file()
         abs_cache_file = os.path.abspath(cache_file)
         data = {}
@@ -91,6 +109,8 @@ class SensorUpdator:
             cache_entry["tou_data"] = tou_data
         if enhanced_balance:
             cache_entry["enhanced_balance"] = enhanced_balance
+        if step_data:
+            cache_entry["step_data"] = step_data
 
         data[user_id] = cache_entry
 
@@ -115,11 +135,10 @@ class SensorUpdator:
         except Exception as e:
             logging.error(f"加载缓存文件失败 {abs_cache_file}: {e}")
             return False
-            
+
         try:
             for user_id, values in data.items():
                 logging.info(f"从缓存恢复户号 {user_id} 的数据")
-                # Filter out 'timestamp' from values before passing to update_one_userid
                 clean_values = {k: v for k, v in values.items() if k != 'timestamp'}
                 self.update_one_userid(user_id, **clean_values, notify=False)
             return True
@@ -139,44 +158,41 @@ class SensorUpdator:
                 return response.json()
             return None
         except Exception as e:
-            logging.warning(f"获取传感器 {sensor_name} 状态失败: {e}")
+            logging.warning(f"获取 {sensor_name} 状态失败: {e}")
             return None
 
     def should_update(self, sensor_name, new_state, check_attributes=None):
         current_state_obj = self.get_sensor_state(sensor_name)
         if not current_state_obj:
             return True
-            
-        # Check state
+
         try:
             current_state = current_state_obj.get('state')
             if current_state in ['unknown', 'unavailable', None]:
                 return True
-            
+
             curr_val = float(current_state)
             new_val = float(new_state)
             if abs(curr_val - new_val) > 0.001:
                 return True
         except (ValueError, TypeError):
-            # If we can't compare as floats, assume they are different
             return True
-            
-        # Check attributes if requested
+
         if check_attributes:
             curr_attrs = current_state_obj.get('attributes', {})
             for k, v in check_attributes.items():
-                # Convert both to string for comparison to avoid type mismatches
                 if str(curr_attrs.get(k)) != str(v):
                     return True
-                    
+
         return False
 
     def update_last_daily_usage(self, postfix: str, last_daily_date: str, sensorState: float):
-        sensorName = DAILY_USAGE_SENSOR_NAME + postfix
-        
+        base = DAILY_USAGE_SENSOR_NAME
+        sensorName = self._sensor_name(base, postfix)
+
         if not self.should_update(sensorName, sensorState, {"last_reset": last_daily_date}):
-             logging.info(f"跳过更新 {sensorName}, 状态一致")
-             return
+            self._log_skip(base, postfix)
+            return
 
         request_body = {
             "state": sensorState,
@@ -187,18 +203,20 @@ class SensorUpdator:
                 "icon": "mdi:lightning-bolt",
                 "device_class": "energy",
                 "state_class": "measurement",
+                "friendly_name": self._sensor_label(base),
             },
         }
 
         self.send_url(sensorName, request_body)
-        logging.info(f"传感器 {sensorName} 已更新: {sensorState} kWh")
+        self._log_updated(base, postfix, sensorState, "kWh")
 
     def update_balance(self, postfix: str, sensorState: float, enhanced_balance: dict = None):
-        sensorName = BALANCE_SENSOR_NAME + postfix
+        base = BALANCE_SENSOR_NAME
+        sensorName = self._sensor_name(base, postfix)
 
         if not self.should_update(sensorName, sensorState):
-             logging.info(f"跳过更新 {sensorName}, 状态一致")
-             return
+            self._log_skip(base, postfix)
+            return
 
         last_reset = datetime.now().strftime("%Y-%m-%d, %H:%M:%S")
         attributes = {
@@ -207,6 +225,7 @@ class SensorUpdator:
             "icon": "mdi:cash",
             "device_class": "monetary",
             "state_class": "total",
+            "friendly_name": self._sensor_label(base),
         }
         if enhanced_balance:
             if enhanced_balance.get("amount_due") is not None:
@@ -219,23 +238,21 @@ class SensorUpdator:
         }
 
         self.send_url(sensorName, request_body)
-        logging.info(f"传感器 {sensorName} 已更新: {sensorState} CNY")
+        self._log_updated(base, postfix, sensorState, "元")
 
     def update_month_data(self, postfix: str, sensorState: float, usage=False):
-        sensorName = (
-            MONTH_USAGE_SENSOR_NAME + postfix
-            if usage
-            else MONTH_CHARGE_SENSOR_NAME + postfix
-        )
+        base = MONTH_USAGE_SENSOR_NAME if usage else MONTH_CHARGE_SENSOR_NAME
+        sensorName = self._sensor_name(base, postfix)
         current_date = datetime.now()
         first_day_of_current_month = current_date.replace(day=1)
         last_day_of_previous_month = first_day_of_current_month - timedelta(days=1)
         last_reset = last_day_of_previous_month.strftime("%Y-%m")
-        
-        if not self.should_update(sensorName, sensorState, {"last_reset": last_reset}):
-             logging.info(f"跳过更新 {sensorName}, 状态一致")
-             return
 
+        if not self.should_update(sensorName, sensorState, {"last_reset": last_reset}):
+            self._log_skip(base, postfix)
+            return
+
+        unit = "kWh" if usage else "元"
         request_body = {
             "state": sensorState,
             "unique_id": sensorName,
@@ -245,28 +262,27 @@ class SensorUpdator:
                 "icon": "mdi:lightning-bolt" if usage else "mdi:cash",
                 "device_class": "energy" if usage else "monetary",
                 "state_class": "measurement",
+                "friendly_name": self._sensor_label(base),
             },
         }
 
         self.send_url(sensorName, request_body)
-        logging.info(f"传感器 {sensorName} 已更新: {sensorState} {'kWh' if usage else 'CNY'}")
+        self._log_updated(base, postfix, sensorState, unit)
 
     def update_yearly_data(self, postfix: str, sensorState: float, usage=False):
-        sensorName = (
-            YEARLY_USAGE_SENSOR_NAME + postfix
-            if usage
-            else YEARLY_CHARGE_SENSOR_NAME + postfix
-        )
+        base = YEARLY_USAGE_SENSOR_NAME if usage else YEARLY_CHARGE_SENSOR_NAME
+        sensorName = self._sensor_name(base, postfix)
         if datetime.now().month == 1:
-            last_year = datetime.now().year -1 
+            last_year = datetime.now().year - 1
             last_reset = datetime.now().replace(year=last_year).strftime("%Y")
         else:
             last_reset = datetime.now().strftime("%Y")
-            
+
         if not self.should_update(sensorName, sensorState, {"last_reset": last_reset}):
-             logging.info(f"跳过更新 {sensorName}, 状态一致")
-             return
-             
+            self._log_skip(base, postfix)
+            return
+
+        unit = "kWh" if usage else "元"
         request_body = {
             "state": sensorState,
             "unique_id": sensorName,
@@ -276,10 +292,35 @@ class SensorUpdator:
                 "icon": "mdi:lightning-bolt" if usage else "mdi:cash",
                 "device_class": "energy" if usage else "monetary",
                 "state_class": "total_increasing",
+                "friendly_name": self._sensor_label(base),
             },
         }
         self.send_url(sensorName, request_body)
-        logging.info(f"传感器 {sensorName} 已更新: {sensorState} {'kWh' if usage else 'CNY'}")
+        self._log_updated(base, postfix, sensorState, unit)
+
+    def _resolve_month_tou_values(self, tou_data: dict) -> tuple[dict, str]:
+        """解析当月谷/平/峰/尖电量，优先账单分时，其次日用电汇总。"""
+        current_month = datetime.now().strftime("%Y-%m")
+        fields = ("valley_usage", "flat_usage", "peak_usage", "tip_usage")
+        values = {k: 0.0 for k in fields}
+
+        bill = tou_data.get("bill_month_tou") or {}
+        bill_month = str(bill.get("month") or "")[:7]
+        if bill_month == current_month:
+            for key in fields:
+                val = bill.get(key)
+                if val is not None:
+                    values[key] = float(val)
+            return values, "账单分时"
+
+        daily_rows = tou_data.get("daily") or []
+        month_rows = [r for r in daily_rows if str(r.get("date", ""))[:7] == current_month]
+        if month_rows:
+            for key in fields:
+                values[key] = sum(float(r.get(key, 0) or 0) for r in month_rows)
+            return values, "日用电汇总"
+
+        return values, ""
 
     def _update_tou_sensors(self, postfix: str, tou_data: dict):
         """更新月度分时电量传感器（谷/平/峰/尖）"""
@@ -288,39 +329,29 @@ class SensorUpdator:
         last_day_prev = first_day - timedelta(days=1)
         last_reset = last_day_prev.strftime("%Y-%m")
 
-        tou_fields = [
-            ("valley_usage", MONTH_VALLEY_SENSOR_NAME, "谷"),
-            ("flat_usage", MONTH_FLAT_SENSOR_NAME, "平"),
-            ("peak_usage", MONTH_PEAK_SENSOR_NAME, "峰"),
-            ("tip_usage", MONTH_TIP_SENSOR_NAME, "尖"),
-        ]
-
-        # 尝试从 daily 数据汇总当月分时电量
-        daily_rows = tou_data.get("daily", [])
-        if not daily_rows:
+        tou_values, source = self._resolve_month_tou_values(tou_data)
+        if not source:
+            logging.info(f"未获取到 {current_date.strftime('%Y-%m')} 月分时电量，跳过谷/平/峰/尖更新")
             return
 
-        current_month_prefix = current_date.strftime("%Y-%m")
-        month_valley = sum(r.get("valley_usage", 0) or 0 for r in daily_rows if str(r.get("date", "")[:7]) == current_month_prefix)
-        month_flat = sum(r.get("flat_usage", 0) or 0 for r in daily_rows if str(r.get("date", "")[:7]) == current_month_prefix)
-        month_peak = sum(r.get("peak_usage", 0) or 0 for r in daily_rows if str(r.get("date", "")[:7]) == current_month_prefix)
-        month_tip = sum(r.get("tip_usage", 0) or 0 for r in daily_rows if str(r.get("date", "")[:7]) == current_month_prefix)
+        logging.info(f"当月分时电量来源: {source}")
 
-        tou_values = {
-            "valley_usage": month_valley,
-            "flat_usage": month_flat,
-            "peak_usage": month_peak,
-            "tip_usage": month_tip,
-        }
+        tou_fields = [
+            ("valley_usage", MONTH_VALLEY_SENSOR_NAME),
+            ("flat_usage", MONTH_FLAT_SENSOR_NAME),
+            ("peak_usage", MONTH_PEAK_SENSOR_NAME),
+            ("tip_usage", MONTH_TIP_SENSOR_NAME),
+        ]
 
-        for field_key, sensor_base, label in tou_fields:
-            value = tou_values.get(field_key, 0)
-            if value <= 0:
-                continue
-            sensorName = sensor_base + postfix
+        for field_key, sensor_base in tou_fields:
+            value = tou_values.get(field_key, 0) or 0
+            sensorName = self._sensor_name(sensor_base, postfix)
+            label = self._sensor_label(sensor_base)
+
             if not self.should_update(sensorName, value, {"last_reset": last_reset}):
-                logging.info(f"跳过更新 {sensorName}, 状态一致")
+                logging.info(f"跳过更新 {label} 【{sensorName}】，状态一致")
                 continue
+
             request_body = {
                 "state": value,
                 "unique_id": sensorName,
@@ -330,17 +361,76 @@ class SensorUpdator:
                     "icon": "mdi:lightning-bolt",
                     "device_class": "energy",
                     "state_class": "measurement",
-                    "friendly_name": f"月度{label}时电量",
+                    "friendly_name": label,
                 },
             }
             self.send_url(sensorName, request_body)
-            logging.info(f"传感器 {sensorName} 已更新: {value} kWh ({label})")
+            logging.info(f"{label} 【{sensorName}】 已更新: {value} kWh")
+
+    def _update_step_sensors(self, postfix: str, step_data: dict):
+        """更新阶梯用电传感器（仅住宅用户有数据）"""
+        year_month = step_data.get("year_month") or datetime.now().strftime("%Y-%m")
+        check_attrs = {"year_month": year_month}
+
+        step_fields = [
+            ("used_step1", STEP_USED_STEP1_SENSOR_NAME, "kWh"),
+            ("remain_step1", STEP_REMAIN_STEP1_SENSOR_NAME, "kWh"),
+            ("used_step2", STEP_USED_STEP2_SENSOR_NAME, "kWh"),
+            ("remain_step2", STEP_REMAIN_STEP2_SENSOR_NAME, "kWh"),
+            ("used_step3", STEP_USED_STEP3_SENSOR_NAME, "kWh"),
+            ("total_usage", STEP_TOTAL_USAGE_SENSOR_NAME, "kWh"),
+        ]
+
+        for field_key, sensor_base, unit in step_fields:
+            if step_data.get(field_key) is None:
+                continue
+            value = float(step_data.get(field_key) or 0)
+            sensorName = self._sensor_name(sensor_base, postfix)
+            label = self._sensor_label(sensor_base)
+            if not self.should_update(sensorName, value, check_attrs):
+                logging.info(f"跳过更新 {label} 【{sensorName}】，状态一致")
+                continue
+            request_body = {
+                "state": value,
+                "unique_id": sensorName,
+                "attributes": {
+                    "year_month": year_month,
+                    "unit_of_measurement": "kWh",
+                    "icon": "mdi:stairs",
+                    "device_class": "energy",
+                    "state_class": "measurement",
+                    "friendly_name": label,
+                },
+            }
+            self.send_url(sensorName, request_body)
+            logging.info(f"{label} 【{sensorName}】 已更新: {value} {unit}")
+
+        if step_data.get("step_stage") is not None:
+            stage = int(step_data.get("step_stage") or 1)
+            sensor_base = STEP_STAGE_SENSOR_NAME
+            sensorName = self._sensor_name(sensor_base, postfix)
+            label = self._sensor_label(sensor_base)
+            if not self.should_update(sensorName, stage, check_attrs):
+                logging.info(f"跳过更新 {label} 【{sensorName}】，状态一致")
+            else:
+                request_body = {
+                    "state": stage,
+                    "unique_id": sensorName,
+                    "attributes": {
+                        "year_month": year_month,
+                        "icon": "mdi:stairs",
+                        "state_class": "measurement",
+                        "friendly_name": label,
+                    },
+                }
+                self.send_url(sensorName, request_body)
+                logging.info(f"{label} 【{sensorName}】 已更新: 第{stage}阶段")
 
     def update_prepay_balance(self, postfix: str, sensorState: float):
-        """更新预付费余额传感器"""
-        sensorName = PREPAY_BALANCE_SENSOR_NAME + postfix
+        base = PREPAY_BALANCE_SENSOR_NAME
+        sensorName = self._sensor_name(base, postfix)
         if not self.should_update(sensorName, sensorState):
-            logging.info(f"跳过更新 {sensorName}，状态一致")
+            self._log_skip(base, postfix)
             return
         last_reset = datetime.now().strftime("%Y-%m-%d, %H:%M:%S")
         request_body = {
@@ -352,22 +442,22 @@ class SensorUpdator:
                 "icon": "mdi:cash-check",
                 "device_class": "monetary",
                 "state_class": "total",
-                "friendly_name": "预付费余额",
+                "friendly_name": self._sensor_label(base),
             },
         }
         self.send_url(sensorName, request_body)
-        logging.info(f"传感器 {sensorName} 已更新: {sensorState} CNY")
+        self._log_updated(base, postfix, sensorState, "元")
 
     def send_url(self, sensorName, request_body):
         headers = {
             "Content-Type": "application-json",
             "Authorization": "Bearer " + self.token,
         }
-        url = self.base_url + API_PATH + sensorName  # /api/states/<entity_id>
+        url = self.base_url + API_PATH + sensorName
         try:
             response = requests.post(url, verify=False, json=request_body, headers=headers)
             logging.debug(
-                f"Homeassistant REST API invoke, POST on {url}. response[{response.status_code}]: {response.content}"
+                f"Home Assistant REST API POST {url} 响应 [{response.status_code}]: {response.content}"
             )
         except Exception as e:
             logging.error(f"Home Assistant REST API 调用失败: {e}")

@@ -2,7 +2,7 @@
 
 [![Docker Build](https://github.com/Poiig/ha_sgcc_electricity/actions/workflows/docker-publish.yml/badge.svg)](https://github.com/Poiig/ha_sgcc_electricity/actions/workflows/docker-publish.yml)
 
-将国家电网（95598）的电费、用电量、分时电量数据接入 Home Assistant，支持腾讯点选验证码自动识别。
+将国家电网（95598）的电费、用电量、分时电量、阶梯用电数据接入 Home Assistant，支持腾讯验证码自动识别。
 
 ## 致谢
 
@@ -15,34 +15,111 @@
 
 ## 功能
 
-- 自动登录国家电网（支持点选验证码自动识别）
+- 自动登录国家电网（支持点选/滑块验证码自动识别）
 - 支持二维码扫码登录（测试时更方便）
 - 通过 Home Assistant REST API 推送传感器数据
 - 支持每日/月度/年度分时电量（谷/平/峰/尖）采集
-- 支持电费余额增强信息
+- 支持住宅用户阶梯用电数据（一/二/三阶已用、剩余、当前阶段）
+- 支持电费余额增强信息（应交金额）
 - 统一数据库表设计（SQLite / MySQL），支持数据保留天数配置
 - 用户名自动从网站获取，无需手动配置映射
 - 忽略户号仅跳过抓取，保留数据库历史数据
 - 密码登录失败自动切换二维码登录兜底
-- 电费余额不足通知（PushPlus / URL Push）
+- 电费余额不足通知（PushPlus / URL / 企业微信）
 
 ### 传感器列表
 
 | 实体 | 说明 |
 |------|------|
-| `sensor.electricity_charge_balance_xxxx` | 电费余额（CNY） |
+| `sensor.electricity_charge_balance_xxxx` | 电费余额（元） |
 | `sensor.last_electricity_usage_xxxx` | 最近一天用电量（kWh） |
 | `sensor.yearly_electricity_usage_xxxx` | 今年总用电量（kWh） |
-| `sensor.yearly_electricity_charge_xxxx` | 今年总电费（CNY） |
+| `sensor.yearly_electricity_charge_xxxx` | 今年总电费（元） |
 | `sensor.month_electricity_usage_xxxx` | 最近一个月用电量（kWh） |
-| `sensor.month_electricity_charge_xxxx` | 上月总电费（CNY） |
-| `sensor.month_valley_usage_xxxx` | 月度谷时电量（kWh） |
-| `sensor.month_flat_usage_xxxx` | 月度平时电量（kWh） |
-| `sensor.month_peak_usage_xxxx` | 月度峰时电量（kWh） |
-| `sensor.month_tip_usage_xxxx` | 月度尖时电量（kWh） |
-| `sensor.prepay_balance_xxxx` | 预付费余额（CNY） |
+| `sensor.month_electricity_charge_xxxx` | 上月总电费（元） |
+| `sensor.month_valley_usage_xxxx` | 当月谷时用电量（kWh） |
+| `sensor.month_flat_usage_xxxx` | 当月平时用电量（kWh） |
+| `sensor.month_peak_usage_xxxx` | 当月峰时用电量（kWh） |
+| `sensor.month_tip_usage_xxxx` | 当月尖时用电量（kWh） |
+| `sensor.prepay_balance_xxxx` | 预付费余额/应交金额（元） |
+| `sensor.step_used_step1_xxxx` | 阶梯一阶已用电量（kWh，住宅用户） |
+| `sensor.step_remain_step1_xxxx` | 阶梯一阶剩余电量（kWh，住宅用户） |
+| `sensor.step_used_step2_xxxx` | 阶梯二阶已用电量（kWh，住宅用户） |
+| `sensor.step_remain_step2_xxxx` | 阶梯二阶剩余电量（kWh，住宅用户） |
+| `sensor.step_used_step3_xxxx` | 阶梯三阶已用电量（kWh，住宅用户） |
+| `sensor.step_total_usage_xxxx` | 阶梯累计用电量（kWh，住宅用户） |
+| `sensor.step_stage_xxxx` | 当前阶梯阶段（1/2/3，住宅用户） |
 
 > 适用于国家电网覆盖省份（南方电网省份不可用），支持 `linux/amd64`、`linux/arm64`。
+
+---
+
+## 验证码识别
+
+登录时可能遇到腾讯**点选**或**滑块**验证码。本项目提供两种识别方式，通过环境变量 `CAPTCHA_SOLVER` 切换：
+
+| 模式 | 配置值 | 说明 |
+|------|--------|------|
+| 本地 OCR（**默认**） | `local` | 免费，基于 ddddocr + 图像匹配，适合点选验证码 |
+| 大模型视觉识别 | `llm` | 火山引擎豆包模型，支持点选 + 滑块，识别率更高 |
+
+本地 OCR 无法满足时可切换大模型模式，或直接使用 `LOGIN_METHOD=qrcode` 扫码登录绕过验证码。
+
+---
+
+## 豆包大模型接入（CAPTCHA_SOLVER=llm）
+
+参考 [ARC-MX/sgcc_electricity_new](https://github.com/ARC-MX/sgcc_electricity_new)，使用**火山引擎豆包大模型**通过 OpenAI 兼容接口自动解算腾讯验证码。
+
+### 使用的模型
+
+通过 OpenAI 兼容接口调用 **`doubao-seed-2-0-pro-260215`**，具备多模态视觉能力，可识别验证码中的图标位置与滑块缺口。
+
+### 注册与接入步骤
+
+1. **注册火山引擎账号**  
+   访问 [火山引擎官网](https://www.volcengine.com/)，使用手机号注册并完成**实名认证**（个人或企业均可）。  
+   实名认证入口：<https://console.volcengine.com/user/authentication/detail/>
+
+2. **开通豆包大模型**  
+   登录 [火山方舟控制台](https://console.volcengine.com/ark/)，进入 **在线推理** 页面，点击 **创建推理接入点**：
+   - 选择模型：**Doubao-Seed-2.0-pro-260215**（或其他支持视觉的多模态模型）
+   - 记录生成的**接入点 ID**（格式如 `ep-2025xxxxxx-xxxxx`，供控制台查阅，程序默认按模型名调用）
+
+3. **获取 API Key**  
+   在方舟控制台左侧 **API Key 管理** → **创建 API Key** → 复制 Key（格式如 `ark-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`）。  
+   管理入口：<https://console.volcengine.com/ark/region:ark+cn-beijing/apiKey>
+
+4. **写入配置**  
+   Docker / 本地运行：编辑 `.env`；HA Add-on：在加载项配置页填写。
+
+   ```env
+   CAPTCHA_SOLVER=llm
+   ARK_API_KEY=ark-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+   ```
+
+   可选高级参数：
+
+   | 变量 | 默认值 | 说明 |
+   |------|--------|------|
+   | `ARK_MODEL` | `doubao-seed-2-0-pro-260215` | 调用的模型名称 |
+   | `ARK_BASE_URL` | `https://ark.cn-beijing.volces.com/api/v3` | API 地址 |
+
+5. **重启服务**  
+   Docker：`docker compose up -d --force-recreate`  
+   Add-on：保存配置后重启加载项
+
+   启动日志应显示：`验证码识别模式: LLM 大模型`
+
+### 费用说明
+
+豆包系列模型按 token 计费，每次验证码解算消耗约数百 token。新用户注册通常有免费额度，个人家庭使用基本免费。详见 [火山引擎官方定价](https://www.volcengine.com/docs/82379/1099320)。
+
+### 注意事项
+
+- **API Key 勿泄露**，不要提交到 Git 或公开渠道
+- 国网每天有**登录次数限制**，验证码识别成功也可能因超限无法登录（RK001），请勿频繁重启测试
+- 大模型仅用于验证码识别，不影响用电量、电费等其他数据抓取逻辑
 
 ---
 
@@ -63,7 +140,7 @@ mkdir ha_sgcc_electricity && cd ha_sgcc_electricity
 curl -O https://raw.githubusercontent.com/Poiig/ha_sgcc_electricity/master/docker-compose.yml
 curl -O https://raw.githubusercontent.com/Poiig/ha_sgcc_electricity/master/example.env
 cp example.env .env && vim .env
-docker compose up -d
+docker compose up -d --force-recreate
 ```
 
 **镜像地址：**
@@ -106,47 +183,44 @@ Docker Compose 方式通过 `.env` 文件配置，完整配置项见 `example.en
 | `HASS_URL` | Home Assistant 地址 |
 | `HASS_TOKEN` | HA 长期访问令牌 |
 
-**可选：**
+**常用可选：**
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
 | `LOGIN_METHOD` | password | 登录方式（password / qrcode） |
 | `LOGIN_FALLBACK` | qrcode | 登录失败备选（qrcode / none） |
-| `JOB_START_TIME` | `07:00` | 每天同步开始时间 |
-| `RUN_ON_STARTUP` | `false` | Docker 启动后立即登录抓取，不等待定时任务 |
-| `CAPTCHA_SOLVER` | `local` | 验证码识别：`local` 本地 OCR / `llm` 豆包大模型 |
+| `JOB_START_TIME` | `09:30` | 每天同步开始时间 |
+| `RUN_ON_STARTUP` | `false` | Docker 启动后立即登录抓取 |
+| `CAPTCHA_SOLVER` | `local` | 验证码识别：`local` 本地 OCR / `llm` 豆包大模型（[接入步骤](#豆包大模型接入-captcha_solverllm)） |
 | `ARK_API_KEY` | — | 火山引擎 API Key（`CAPTCHA_SOLVER=llm` 时必填） |
-| `DB_TYPE` | none | 数据库类型（none / sqlite / mysql） |
-| `DAILY_FETCH_DAYS` | 7 | 每次获取日用电量天数（7 或 30） |
+| `DB_TYPE` | sqlite | 数据库类型（none / sqlite / mysql） |
+| `DAILY_FETCH_DAYS` | 30 | 每次获取日用电量天数（7 或 30） |
 | `DATA_RETENTION_DAYS` | 365 | 数据库记录保留天数 |
 | `IGNORE_USER_ID` | 空 | 忽略的户号（逗号分隔） |
-| `RETRY_WAIT_TIME_OFFSET_UNIT` | 10 | 页面操作等待秒数（2-30） |
 | `PUSH_TYPE` | none | 通知方式（none / pushplus / urlpush / wework） |
-| `WEWORK_WEBHOOK_URL` | — | 企业微信群机器人 webhook（`PUSH_TYPE=wework` 时必填） |
-| `WEWORK_PUSH_SUMMARY` | `true` | 拉取成功后推送户号数据汇总到企微 |
-| `BALANCE` | 100 | 余额低于此值时通知（元） |
+| `BALANCE` | 5.0 | 余额低于此值时通知（需开启 PUSH_TYPE） |
 
 ---
 
 ## 数据库
 
-启用数据库后，程序自动创建 5 张表存储用电数据，详见 [docs/DATABASE.md](docs/DATABASE.md)。
+启用数据库后，程序自动创建 6 张表存储用电数据（含阶梯用电），详见 [docs/DATABASE.md](docs/DATABASE.md)。
 
 ---
 
 ## 常见问题
 
 **Q: 验证码识别失败**
-> 检查 `data/pages/` 下的调试截图。国网每天有登录次数限制，频繁测试会触发 RK001 错误。
+> 检查 `data/pages/` 下的调试截图。可切换 `CAPTCHA_SOLVER=llm` 或 `LOGIN_METHOD=qrcode` 扫码登录。国网每天有登录次数限制。
 
 **Q: RK001 网络连接超时**
 > 国网检测到异常登录频率，等待几小时后重试。
 
-**Q: Docker 镜像较大**
-> 镜像包含 Chromium 浏览器、中文字体和验证码识别依赖。
+**Q: 阶梯用电传感器无数据**
+> 仅住宅用户（户名含「住宅」）有阶梯数据，充电桩等非住宅户号会自动跳过。
 
 **Q: 分时电量数据为空**
-> 分时电量通过 Vue state 注入从页面提取，部分省份可能不支持。基础用电量数据通过 DOM 提取，兼容性更好。
+> 分时电量通过 Vue state 或日用电汇总提取，部分省份可能不支持。
 
 **Q: HA Add-on 启动报 Duplicate mount point**
 > 升级到 v2.0.0+ 已修复此问题。如仍出现，卸载重装 Add-on。

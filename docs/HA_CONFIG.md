@@ -150,6 +150,96 @@ template:
         state_class: measurement
         unit_of_measurement: "CNY"
         device_class: monetary
+
+  # 阶梯用电（仅住宅用户，xxxx 替换为户号后四位）
+  - trigger:
+      - platform: event
+        event_type: state_changed
+        event_data:
+          entity_id: sensor.step_used_step1_xxxx
+    sensor:
+      - name: step_used_step1_xxxx
+        unique_id: step_used_step1_xxxx
+        state: "{{ states('sensor.step_used_step1_xxxx') }}"
+        state_class: measurement
+        unit_of_measurement: "kWh"
+        device_class: energy
+
+  - trigger:
+      - platform: event
+        event_type: state_changed
+        event_data:
+          entity_id: sensor.step_remain_step1_xxxx
+    sensor:
+      - name: step_remain_step1_xxxx
+        unique_id: step_remain_step1_xxxx
+        state: "{{ states('sensor.step_remain_step1_xxxx') }}"
+        state_class: measurement
+        unit_of_measurement: "kWh"
+        device_class: energy
+
+  - trigger:
+      - platform: event
+        event_type: state_changed
+        event_data:
+          entity_id: sensor.step_used_step2_xxxx
+    sensor:
+      - name: step_used_step2_xxxx
+        unique_id: step_used_step2_xxxx
+        state: "{{ states('sensor.step_used_step2_xxxx') }}"
+        state_class: measurement
+        unit_of_measurement: "kWh"
+        device_class: energy
+
+  - trigger:
+      - platform: event
+        event_type: state_changed
+        event_data:
+          entity_id: sensor.step_remain_step2_xxxx
+    sensor:
+      - name: step_remain_step2_xxxx
+        unique_id: step_remain_step2_xxxx
+        state: "{{ states('sensor.step_remain_step2_xxxx') }}"
+        state_class: measurement
+        unit_of_measurement: "kWh"
+        device_class: energy
+
+  - trigger:
+      - platform: event
+        event_type: state_changed
+        event_data:
+          entity_id: sensor.step_used_step3_xxxx
+    sensor:
+      - name: step_used_step3_xxxx
+        unique_id: step_used_step3_xxxx
+        state: "{{ states('sensor.step_used_step3_xxxx') }}"
+        state_class: measurement
+        unit_of_measurement: "kWh"
+        device_class: energy
+
+  - trigger:
+      - platform: event
+        event_type: state_changed
+        event_data:
+          entity_id: sensor.step_total_usage_xxxx
+    sensor:
+      - name: step_total_usage_xxxx
+        unique_id: step_total_usage_xxxx
+        state: "{{ states('sensor.step_total_usage_xxxx') }}"
+        state_class: measurement
+        unit_of_measurement: "kWh"
+        device_class: energy
+
+  - trigger:
+      - platform: event
+        event_type: state_changed
+        event_data:
+          entity_id: sensor.step_stage_xxxx
+    sensor:
+      - name: step_stage_xxxx
+        unique_id: step_stage_xxxx
+        state: "{{ states('sensor.step_stage_xxxx') }}"
+        state_class: measurement
 ```
 
 配置后重启 Home Assistant。
@@ -157,3 +247,5 @@ template:
 ## 多户号
 
 如果有多个户号，为每个户号复制一份上述配置，替换对应的 `xxxx` 后四位。
+
+> 阶梯用电传感器仅对住宅户号有数据；非住宅户号（如充电桩）不会创建或更新这些实体。

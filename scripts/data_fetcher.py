@@ -653,13 +653,14 @@ class DataFetcher:
                 logging.info(f"当前用户: {current_userid}, 开始获取用电数据...")
                 driver.get(BALANCE_URL)
                 time.sleep(self._step_wait)
-                balance, last_daily_date, last_daily_usage, yearly_charge, yearly_usage, month_charge, month_usage, tou_data, enhanced_balance = self._get_all_data(driver, user_id, userid_index)
+                balance, last_daily_date, last_daily_usage, yearly_charge, yearly_usage, month_charge, month_usage, tou_data, enhanced_balance, step_data = self._get_all_data(driver, user_id, userid_index)
                 logging.info(f"用户 [{user_id}] 数据获取完成: 余额={balance}CNY, 最近日用电={last_daily_usage}kWh({last_daily_date}), "
                              f"年度用电={yearly_usage}kWh, 年度电费={yearly_charge}CNY, 月用电={month_usage}kWh, 月电费={month_charge}CNY")
                 updator.update_one_userid(
                     user_id, balance, last_daily_date, last_daily_usage,
                     yearly_charge, yearly_usage, month_charge, month_usage,
                     tou_data=tou_data, enhanced_balance=enhanced_balance,
+                    step_data=step_data,
                     user_name=self._user_name_map.get(user_id, ""),
                 )
                 fetch_results.append({
@@ -1078,13 +1079,17 @@ class DataFetcher:
         else:
             logging.warning(f"[{user_id}] 最近一日用电获取失败 (DOM 和 Vue state 均未获取到)")
 
-        # 尝试获取电费账单明细（月度分时）
+        # 尝试获取电费账单明细（月度分时，供 HA 传感器与数据库使用）
         bill_tou_data = None
-        if self.db is not None:
-            try:
-                bill_tou_data = self._get_bill_detail(driver, user_id)
-            except Exception as e:
-                logging.warning(f"[{user_id}] 电费账单分时数据获取失败: {e}")
+        try:
+            bill_tou_data = self._get_bill_detail(driver, user_id)
+        except Exception as e:
+            logging.warning(f"[{user_id}] 电费账单分时数据获取失败: {e}")
+
+        if bill_tou_data:
+            if tou_data is None:
+                tou_data = {}
+            tou_data["bill_month_tou"] = bill_tou_data
 
         # 数据库存储：先拉取 N 天日用电，再统一写入
         if self.db is not None:
@@ -1124,7 +1129,7 @@ class DataFetcher:
         else:
             month_usage = None
 
-        return balance, last_daily_date, last_daily_usage, yearly_charge, yearly_usage, month_charge, month_usage, tou_data, enhanced_balance
+        return balance, last_daily_date, last_daily_usage, yearly_charge, yearly_usage, month_charge, month_usage, tou_data, enhanced_balance, step_data
 
     def _db_insert(self, user_id: str, label: str, func, *args, **kwargs) -> bool:
         """执行数据库写入并记录结果，避免静默失败"""

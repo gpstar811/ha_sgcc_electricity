@@ -25,11 +25,40 @@ MONTH_FLAT_SENSOR_NAME = "sensor.month_flat_usage"
 MONTH_PEAK_SENSOR_NAME = "sensor.month_peak_usage"
 MONTH_TIP_SENSOR_NAME = "sensor.month_tip_usage"
 PREPAY_BALANCE_SENSOR_NAME = "sensor.prepay_balance"
+STEP_USED_STEP1_SENSOR_NAME = "sensor.step_used_step1"
+STEP_REMAIN_STEP1_SENSOR_NAME = "sensor.step_remain_step1"
+STEP_USED_STEP2_SENSOR_NAME = "sensor.step_used_step2"
+STEP_REMAIN_STEP2_SENSOR_NAME = "sensor.step_remain_step2"
+STEP_USED_STEP3_SENSOR_NAME = "sensor.step_used_step3"
+STEP_TOTAL_USAGE_SENSOR_NAME = "sensor.step_total_usage"
+STEP_STAGE_SENSOR_NAME = "sensor.step_stage"
 BALANCE_UNIT = "CNY"
 USAGE_UNIT = "KWH"
 
 # 项目仓库
 REPO_URL = "https://github.com/Poiig/ha_sgcc_electricity"
+
+# Home Assistant 传感器友好名称（日志展示用）
+SENSOR_LABELS = {
+    BALANCE_SENSOR_NAME: "电费余额",
+    DAILY_USAGE_SENSOR_NAME: "最近日用电量",
+    YEARLY_USAGE_SENSOR_NAME: "年度用电量",
+    YEARLY_CHARGE_SENSOR_NAME: "年度电费",
+    MONTH_USAGE_SENSOR_NAME: "当月用电量",
+    MONTH_CHARGE_SENSOR_NAME: "当月电费",
+    MONTH_VALLEY_SENSOR_NAME: "当月谷时用电量",
+    MONTH_FLAT_SENSOR_NAME: "当月平时用电量",
+    MONTH_PEAK_SENSOR_NAME: "当月峰时用电量",
+    MONTH_TIP_SENSOR_NAME: "当月尖时用电量",
+    PREPAY_BALANCE_SENSOR_NAME: "预付费余额/应交金额",
+    STEP_USED_STEP1_SENSOR_NAME: "阶梯一阶已用电量",
+    STEP_REMAIN_STEP1_SENSOR_NAME: "阶梯一阶剩余电量",
+    STEP_USED_STEP2_SENSOR_NAME: "阶梯二阶已用电量",
+    STEP_REMAIN_STEP2_SENSOR_NAME: "阶梯二阶剩余电量",
+    STEP_USED_STEP3_SENSOR_NAME: "阶梯三阶已用电量",
+    STEP_TOTAL_USAGE_SENSOR_NAME: "阶梯累计用电量",
+    STEP_STAGE_SENSOR_NAME: "阶梯当前阶段",
+}
 
 
 def get_data_dir() -> str:
