@@ -91,10 +91,10 @@ class SqliteDB(DB):
             self.connect = sqlite3.connect(db_path, timeout=30)
             self._configure()
             self._create_schema()
-            logging.info("SQLite ready at %s for user %s", db_path, self.user_id)
+            logging.info("SQLite 已就绪: %s，户号 %s", db_path, self.user_id)
             return True
         except (sqlite3.Error, ValueError) as exc:
-            logging.error("Failed to prepare SQLite: %s", exc)
+            logging.error("SQLite 初始化失败: %s", exc)
             return False
 
     def _configure(self) -> None:
@@ -323,7 +323,7 @@ class SqliteDB(DB):
         cutoff = (datetime.now() - timedelta(days=retention_days)).strftime("%Y-%m-%d")
         self._execute(f"DELETE FROM {self.DAILY_TABLE} WHERE user_id=? AND date<?", (self.user_id, cutoff))
         self._execute(f"DELETE FROM {self.BALANCE_TABLE} WHERE user_id=? AND as_of<?", (self.user_id, cutoff))
-        logging.info("Cleaned up data older than %s for user %s", cutoff, self.user_id)
+        logging.info("已清理户号 %s 早于 %s 的历史数据", self.user_id, cutoff)
 
     def insert_step_data(self, data: dict) -> bool:
         year_month = str(data["year_month"]).strip()
@@ -353,25 +353,25 @@ class SqliteDB(DB):
         for tbl in [self.DAILY_TABLE, self.MONTHLY_TABLE, self.YEARLY_TABLE,
                      self.BALANCE_TABLE, self.STEP_TABLE, self.USERS_TABLE]:
             self._execute(f"DELETE FROM {tbl} WHERE user_id=?", (str(user_id).strip(),))
-        logging.info("Deleted all data for user %s", user_id)
+        logging.info("已删除户号 %s 的全部数据", user_id)
 
     def _execute(self, sql: str, params: tuple = ()) -> bool:
         if self.connect is None:
-            logging.error("Database not connected.")
+            logging.error("数据库未连接")
             return False
         try:
             self.connect.execute(sql, params)
             self.connect.commit()
             return True
         except (sqlite3.Error, TypeError, ValueError) as exc:
-            logging.error("DB execute failed: %s", exc)
+            logging.error("数据库执行失败: %s", exc)
             return False
 
     def close_connect(self) -> None:
         if self.connect is not None:
             self.connect.close()
             self.connect = None
-            logging.info("SQLite connection closed.")
+            logging.info("SQLite 连接已关闭")
 
 
 # ---------------------------------------------------------------------------
@@ -405,11 +405,11 @@ class MysqlDB(DB):
             )
             if self.connect.is_connected():
                 self._create_schema()
-                logging.info("MySQL connected for user %s", self.user_id)
+                logging.info("MySQL 已连接，户号 %s", self.user_id)
                 return True
             return False
         except Exception as exc:
-            logging.error("MySQL connect failed: %s", exc)
+            logging.error("MySQL 连接失败: %s", exc)
             return False
 
     def _create_schema(self) -> None:
@@ -495,7 +495,7 @@ class MysqlDB(DB):
 
             self.connect.commit()
         except Exception as exc:
-            logging.error("MySQL schema creation failed: %s", exc)
+            logging.error("MySQL 表结构创建失败: %s", exc)
         finally:
             cursor.close()
 
@@ -606,7 +606,7 @@ class MysqlDB(DB):
         cutoff = (datetime.now() - timedelta(days=retention_days)).strftime("%Y-%m-%d")
         self._execute(f"DELETE FROM `{self.DAILY_TABLE}` WHERE user_id=%s AND date<%s", (self.user_id, cutoff))
         self._execute(f"DELETE FROM `{self.BALANCE_TABLE}` WHERE user_id=%s AND as_of<%s", (self.user_id, cutoff))
-        logging.info("Cleaned up data older than %s for user %s", cutoff, self.user_id)
+        logging.info("已清理户号 %s 早于 %s 的历史数据", self.user_id, cutoff)
 
     def insert_step_data(self, data: dict) -> bool:
         year_month = str(data["year_month"]).strip()
@@ -635,11 +635,11 @@ class MysqlDB(DB):
         for tbl in [self.DAILY_TABLE, self.MONTHLY_TABLE, self.YEARLY_TABLE,
                      self.BALANCE_TABLE, self.STEP_TABLE, self.USERS_TABLE]:
             self._execute(f"DELETE FROM `{tbl}` WHERE user_id=%s", (str(user_id).strip(),))
-        logging.info("Deleted all data for user %s", user_id)
+        logging.info("已删除户号 %s 的全部数据", user_id)
 
     def _execute(self, sql: str, params: tuple = ()) -> bool:
         if self.connect is None or not self.connect.is_connected():
-            logging.error("MySQL not connected.")
+            logging.error("MySQL 未连接")
             return False
         cursor = None
         try:
@@ -648,7 +648,7 @@ class MysqlDB(DB):
             self.connect.commit()
             return True
         except Exception as exc:
-            logging.error("MySQL execute failed: %s", exc)
+            logging.error("MySQL 执行失败: %s", exc)
             return False
         finally:
             if cursor:
@@ -658,7 +658,7 @@ class MysqlDB(DB):
         if self.connect and self.connect.is_connected():
             self.connect.close()
             self.connect = None
-            logging.info("MySQL connection closed.")
+            logging.info("MySQL 连接已关闭")
 
 
 def _sf(value: Any, default: Optional[float] = None) -> Optional[float]:

@@ -79,7 +79,7 @@ class PointClickImageSolver:
         try:
             import ddddocr
         except Exception as exc:
-            logging.info("ddddocr is not available: %s", exc)
+            logging.info("ddddocr 不可用: %s", exc)
             return None, None
         try:
             return (
@@ -87,7 +87,7 @@ class PointClickImageSolver:
                 ddddocr.DdddOcr(show_ad=False),
             )
         except Exception as exc:
-            logging.warning("Failed to initialize ddddocr: %s", exc)
+            logging.warning("ddddocr 初始化失败: %s", exc)
             return None, None
 
     @staticmethod
@@ -295,7 +295,7 @@ class PointClickImageSolver:
         candidate_boxes = det.detection(bg_bytes.getvalue()) or []
 
         if not answer_boxes or not candidate_boxes:
-            logging.info("ddddocr detection returned no boxes for mixed point-click captcha.")
+            logging.info("混合点选验证码 OCR 未检测到目标框")
             return []
 
         answer_boxes = [box for box in answer_boxes if box[1] < 45]
@@ -320,7 +320,7 @@ class PointClickImageSolver:
             candidate_tokens.append((token, box))
 
         logging.info(
-            "Point-click mixed OCR tokens: answers=%s candidates=%s",
+            "混合点选 OCR 匹配: 答案=%s, 候选=%s",
             [(token, kind) for token, kind, _box in answer_tokens],
             [(token, box) for token, box in candidate_tokens],
         )
@@ -417,7 +417,7 @@ class PointClickImageSolver:
         widget_image.save(widget_bytes, format="PNG")
         boxes = det.detection(widget_bytes.getvalue()) or []
         if not boxes:
-            logging.info("ddddocr detection returned no boxes for point-click captcha.")
+            logging.info("点选验证码 OCR 未检测到目标框")
             return []
 
         answer_boxes = [box for box in boxes if box[1] < 45]
@@ -443,7 +443,7 @@ class PointClickImageSolver:
                 candidate_tokens.append((token, box))
 
         logging.info(
-            "Point-click OCR tokens: answers=%s candidates=%s",
+            "点选 OCR 匹配: 答案=%s, 候选=%s",
             [token for token, _box in answer_tokens],
             [(token, box) for token, box in candidate_tokens],
         )
@@ -801,7 +801,7 @@ class PointClickImageSolver:
             "rejection_reason": None,
         }
         logging.info(
-            "Point-click solver image stats: targets=%s candidates=%s",
+            "点选识别统计: 目标=%s, 候选=%s",
             len(target_boxes),
             len(candidates),
         )
@@ -809,7 +809,7 @@ class PointClickImageSolver:
             diagnostics["rejection_reason"] = "insufficient_objects"
             self.last_diagnostics = diagnostics
             logging.warning(
-                "Point-click solver has insufficient objects: targets=%s, candidates=%s",
+                "点选识别目标不足: 目标=%s, 候选=%s",
                 len(target_boxes),
                 len(candidates),
             )
@@ -989,7 +989,7 @@ class PointClickImageSolver:
             return []
         average_score, points = solutions[0]
         logging.info(
-            "Point-click solver points=%s, average_score=%.3f",
+            "点选坐标=%s, 平均得分=%.3f",
             [(round(x, 1), round(y, 1), round(score, 3)) for x, y, score in points],
             average_score,
         )

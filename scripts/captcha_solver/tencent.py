@@ -308,11 +308,11 @@ class TencentCaptchaHandler:
                 ["刷新", "换一张", "重试", "换图", "看不清", "refresh", "reload", "retry"],
             )
             if refresh:
-                logging.info("Clicked point-click captcha refresh button.")
+                logging.info("已点击验证码刷新按钮")
                 time.sleep(random.uniform(0.8, 1.4))
                 return True
         except Exception as exc:
-            logging.info("Failed to click refresh button: %s", exc)
+            logging.info("点击刷新按钮失败: %s", exc)
         return False
 
     @staticmethod
@@ -379,7 +379,7 @@ class TencentCaptchaHandler:
             )
             driver.execute_script("arguments[0].click();", confirm)
         except Exception:
-            logging.info("Confirm button not found, points may auto-submit.")
+            logging.info("未找到确认按钮，坐标点击后可能自动提交")
 
         time.sleep(random.uniform(1.5, 2.5))
         return not self.has_captcha(driver)
@@ -390,10 +390,10 @@ class TencentCaptchaHandler:
         bg_image = None
         try:
             info = self.get_info(driver)
-            logging.info("Tencent captcha detected, mode=%s, prompt=%s", info.get("mode"), info.get("prompt", ""))
+            logging.info("检测到腾讯验证码, 类型=%s, 提示=%s", info.get("mode"), info.get("prompt", ""))
 
             if info.get("mode") != "point_click":
-                logging.info("Captcha is not point_click mode, cannot solve locally.")
+                logging.info("验证码非点选类型，无法本地识别")
                 return False
 
             for attempt in range(self.point_click_max_refreshes + 1):
@@ -419,7 +419,7 @@ class TencentCaptchaHandler:
                         or False
                     )
                 except Exception as exc:
-                    logging.info("Point-click elements not ready on attempt %s: %s", attempt, exc)
+                    logging.info("第 %s 次尝试时点选元素未就绪: %s", attempt, exc)
                     if attempt < self.point_click_max_refreshes and self._click_point_click_refresh(driver):
                         continue
                     return False
@@ -445,33 +445,33 @@ class TencentCaptchaHandler:
                 )
 
                 if not solutions:
-                    logging.info("No confident solution found on attempt %s.", attempt)
+                    logging.info("第 %s 次尝试未找到可靠方案", attempt)
                     if attempt < self.point_click_max_refreshes and self._click_point_click_refresh(driver):
                         continue
                     return False
 
                 for solution_index, (average_score, points) in enumerate(solutions, start=1):
                     logging.info(
-                        "Point-click solution #%s: points=%s average_score=%.3f",
+                        "点选方案 #%s: 坐标=%s, 平均得分=%.3f",
                         solution_index,
                         [(round(x, 1), round(y, 1), round(s, 3)) for x, y, s in points],
                         average_score,
                     )
                     if self._try_click_solution(driver, bg_element, bg_image, points):
                         logging.info(
-                            "Point-click captcha solved on attempt %s solution #%s.",
+                            "第 %s 次尝试方案 #%s 点选验证码识别成功",
                             attempt,
                             solution_index,
                         )
                         self._save_debug_images(answer_image, bg_image, f"success_{attempt}_{solution_index}")
                         return True
                     logging.info(
-                        "Point-click solution #%s failed on attempt %s, trying next candidate.",
+                        "点选方案 #%s 在第 %s 次尝试失败，尝试下一候选",
                         solution_index,
                         attempt,
                     )
 
-                logging.info("All point-click candidates failed on attempt %s.", attempt)
+                logging.info("第 %s 次尝试所有点选方案均失败", attempt)
                 self._save_debug_images(answer_image, bg_image, f"failed_{attempt}")
                 if attempt < self.point_click_max_refreshes and self._click_point_click_refresh(driver):
                     continue
@@ -479,7 +479,7 @@ class TencentCaptchaHandler:
 
             return False
         except Exception as exc:
-            logging.warning("Point-click captcha solver failed: %s", exc)
+            logging.warning("点选验证码识别失败: %s", exc)
             if answer_image is not None and bg_image is not None:
                 self._save_debug_images(answer_image, bg_image, "exception")
             return False
@@ -494,7 +494,7 @@ class TencentCaptchaHandler:
             bg_path = self._trace_dir / f"captcha_bg_{suffix}.png"
             answer_image.save(answer_path)
             bg_image.save(bg_path)
-            logging.info("Saved captcha debug images to %s and %s", answer_path, bg_path)
+            logging.info("验证码调试图已保存: %s, %s", answer_path, bg_path)
             # Save diagnostics
             report = self._point_click_solver.get_last_diagnostics()
             if report:
@@ -503,4 +503,4 @@ class TencentCaptchaHandler:
                     json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8"
                 )
         except Exception as exc:
-            logging.debug("Failed to save debug images: %s", exc)
+            logging.debug("保存调试图失败: %s", exc)

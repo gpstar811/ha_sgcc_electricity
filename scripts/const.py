@@ -28,6 +28,9 @@ PREPAY_BALANCE_SENSOR_NAME = "sensor.prepay_balance"
 BALANCE_UNIT = "CNY"
 USAGE_UNIT = "KWH"
 
+# 项目仓库
+REPO_URL = "https://github.com/Poiig/ha_sgcc_electricity"
+
 
 def get_data_dir() -> str:
     """获取数据存储目录：Docker 用 /data，本地用项目下的 data/"""

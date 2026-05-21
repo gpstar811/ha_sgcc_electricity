@@ -32,49 +32,52 @@ def main():
         try:
             for key, value in options.items():
                 os.environ[key] = str(value)
-            logging.info(f"当前以Homeassistant Add-on 形式运行.")
+            logging.info("当前以 Home Assistant Add-on 形式运行")
         except Exception as e:
-            logging.error(f"Failing to read the options.json file, the program will exit with an error message: {e}.")
+            logging.error(f"读取 options.json 失败，程序退出: {e}")
             sys.exit()
 
     try:
         PHONE_NUMBER = os.getenv("PHONE_NUMBER")
-        logging.info(f"read env PHONE_NUMBER : {PHONE_NUMBER}")
         PASSWORD = os.getenv("PASSWORD")
         HASS_URL = os.getenv("HASS_URL")
         JOB_START_TIME = os.getenv("JOB_START_TIME", "09:30")
-        RUN_ON_STARTUP = os.getenv("RUN_ON_STARTUP", "false").lower() in ("true", "1", "yes")
-        logging.info(f"RUN_ON_STARTUP={os.getenv('RUN_ON_STARTUP', 'false')} (生效: {RUN_ON_STARTUP})")
+        RUN_ON_STARTUP = os.getenv("RUN_ON_STARTUP", "false").strip().strip('"').strip("'").lower() in ("true", "1", "yes")
         LOG_LEVEL = os.getenv("LOG_LEVEL","INFO")
         VERSION = os.getenv("VERSION")
         RETRY_TIMES_LIMIT = int(os.getenv("RETRY_TIMES_LIMIT", 5))
         
         logger_init(LOG_LEVEL)
-        logging.info(f"The current run runs as a docker image.")
+        if 'PYTHON_IN_DOCKER' in os.environ:
+            logging.info("当前运行在 Docker 容器中")
+        else:
+            logging.info("当前运行在本地环境")
+        logging.info(f"登录账号: {PHONE_NUMBER}")
+        logging.info(f"RUN_ON_STARTUP={os.getenv('RUN_ON_STARTUP', 'false')} (生效: {'是' if RUN_ON_STARTUP else '否'})")
     except Exception as e:
-        logging.error(f"Failing to read the .env file, the program will exit with an error message: {e}.")
+        logging.error(f"读取环境变量失败，程序退出: {e}")
         sys.exit()
 
-    logging.info(f"The current repository version is {VERSION}, and the repository address is https://github.com/ARC-MX/sgcc_electricity_new.git")
+    logging.info(f"当前版本: {VERSION}，仓库地址: {REPO_URL}")
     current_datetime = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    logging.info(f"The current date is {current_datetime}.")
+    logging.info(f"当前时间: {current_datetime}")
 
-    logging.info(f"start init ErrorWatcher")
+    logging.info("正在初始化 ErrorWatcher...")
     error_dir = os.path.join(get_data_dir(), 'errors')
     ErrorWatcher.init(root_dir=error_dir)
-    logging.info(f'ErrorWatcher init done!')
+    logging.info("ErrorWatcher 初始化完成")
     fetcher = DataFetcher(PHONE_NUMBER, PASSWORD)
     updator = SensorUpdator()
 
     # 生成随机延迟时间（-10分钟到+10分钟）
     random_delay_minutes = random.randint(-10, 10)
     parsed_time = datetime.strptime(JOB_START_TIME, "%H:%M") + timedelta(minutes=random_delay_minutes)
-    logging.info(f"The current logged-in user name is {PHONE_NUMBER}, the homeassistant address is {HASS_URL}, and the program will be executed every day at {parsed_time.strftime('%H:%M')}.")
+    logging.info(f"登录账号: {PHONE_NUMBER}，Home Assistant 地址: {HASS_URL}，每天 {parsed_time.strftime('%H:%M')} 定时同步")
 
     # 添加随机延迟
     next_run_time = parsed_time + timedelta(hours=12)
 
-    logging.info(f'定时任务已注册，每天 {parsed_time.strftime("%H:%M")} 和 {next_run_time.strftime("%H:%M")} 各执行一次')
+    logging.info(f"定时任务已注册，每天 {parsed_time.strftime('%H:%M')} 和 {next_run_time.strftime('%H:%M')} 各执行一次")
     schedule.every().day.at(parsed_time.strftime("%H:%M")).do(run_task, fetcher)
     schedule.every().day.at(next_run_time.strftime("%H:%M")).do(run_task, fetcher)
     
@@ -104,7 +107,7 @@ def run_task(data_fetcher: DataFetcher):
             data_fetcher.fetch()
             return
         except Exception as e:
-            logging.error(f"state-refresh task failed, reason is [{e}], {RETRY_TIMES_LIMIT - retry_times} retry times left.")
+            logging.error(f"数据同步任务失败: [{e}]，剩余重试次数 {RETRY_TIMES_LIMIT - retry_times}")
             continue
 
 def logger_init(level: str):

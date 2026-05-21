@@ -73,7 +73,7 @@ class SensorUpdator:
                 with open(cache_file, 'r') as f:
                     data = json.load(f)
         except Exception as e:
-            logging.warning(f"Failed to load cache file: {e}")
+            logging.warning(f"加载缓存文件失败: {e}")
 
         cache_entry = {
             "balance": balance,
@@ -97,15 +97,15 @@ class SensorUpdator:
         try:
             with open(cache_file, 'w') as f:
                 json.dump(data, f, indent=2)
-            logging.debug(f"Saved data to cache file: {abs_cache_file}")
+            logging.debug(f"数据已写入缓存: {abs_cache_file}")
         except Exception as e:
-            logging.error(f"Failed to save cache file {abs_cache_file}: {e}")
+            logging.error(f"保存缓存文件失败 {abs_cache_file}: {e}")
 
     def republish(self):
         cache_file = self._get_cache_file()
         abs_cache_file = os.path.abspath(cache_file)
         if not os.path.exists(cache_file):
-            logging.info(f"No cache file found at {abs_cache_file}, skipping republish.")
+            logging.info(f"未找到缓存文件 {abs_cache_file}，跳过恢复")
             return False
 
         data = {}
@@ -113,18 +113,18 @@ class SensorUpdator:
             with open(cache_file, 'r') as f:
                 data = json.load(f)
         except Exception as e:
-            logging.error(f"Failed to load cache file {abs_cache_file}: {e}")
+            logging.error(f"加载缓存文件失败 {abs_cache_file}: {e}")
             return False
             
         try:
             for user_id, values in data.items():
-                logging.info(f"Republishing data for user {user_id} from cache.")
+                logging.info(f"从缓存恢复户号 {user_id} 的数据")
                 # Filter out 'timestamp' from values before passing to update_one_userid
                 clean_values = {k: v for k, v in values.items() if k != 'timestamp'}
                 self.update_one_userid(user_id, **clean_values, notify=False)
             return True
         except Exception as e:
-            logging.error(f"Failed to republish data: {e}")
+            logging.error(f"从缓存恢复数据失败: {e}")
             return False
 
     def get_sensor_state(self, sensor_name):
@@ -139,7 +139,7 @@ class SensorUpdator:
                 return response.json()
             return None
         except Exception as e:
-            logging.warning(f"Failed to get sensor state for {sensor_name}: {e}")
+            logging.warning(f"获取传感器 {sensor_name} 状态失败: {e}")
             return None
 
     def should_update(self, sensor_name, new_state, check_attributes=None):
@@ -340,7 +340,7 @@ class SensorUpdator:
         """更新预付费余额传感器"""
         sensorName = PREPAY_BALANCE_SENSOR_NAME + postfix
         if not self.should_update(sensorName, sensorState):
-            logging.info(f"Skipping update for {sensorName}, state matches.")
+            logging.info(f"跳过更新 {sensorName}，状态一致")
             return
         last_reset = datetime.now().strftime("%Y-%m-%d, %H:%M:%S")
         request_body = {
@@ -370,4 +370,4 @@ class SensorUpdator:
                 f"Homeassistant REST API invoke, POST on {url}. response[{response.status_code}]: {response.content}"
             )
         except Exception as e:
-            logging.error(f"Homeassistant REST API invoke failed, reason is {e}")
+            logging.error(f"Home Assistant REST API 调用失败: {e}")

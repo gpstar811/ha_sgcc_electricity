@@ -57,7 +57,7 @@ class DataFetcher:
         self._user_name_map = {}
         # 本地运行用更短的步骤等待
         self._step_wait = 2 if 'PYTHON_IN_DOCKER' not in os.environ else self.RETRY_WAIT_TIME_OFFSET_UNIT
-        logging.info(f"DataFetcher 初始化完成: 用户={username}, 步骤等待={self._step_wait}s, "
+        logging.info(f"数据抓取器初始化完成: 用户={username}, 步骤等待={self._step_wait}s, "
                      f"隐式等待={self.DRIVER_IMPLICITY_WAIT_TIME}s, 重试次数={self.RETRY_TIMES_LIMIT}")
         self._init_db()
     
@@ -66,14 +66,14 @@ class DataFetcher:
         if self.db_type == 'mysql':
             from db import MysqlDB
             self.db = MysqlDB()
-            logging.info("Using MySQL database to store data.")
+            logging.info("使用 MySQL 数据库存储数据")
         elif self.db_type == 'sqlite':
             from db import SqliteDB
             self.db = SqliteDB()
-            logging.info("Using Sqlite database to store data.")
+            logging.info("使用 SQLite 数据库存储数据")
         else:
             self.db = None
-            logging.info("No database will be used to store data.")
+            logging.info("未配置数据库，不存储数据")
 
     # @staticmethod
     def _click_button(self, driver, button_search_type, button_search_key):
@@ -345,9 +345,10 @@ class DataFetcher:
         """本地 OCR/图像匹配解算点选验证码。"""
         self.tencent_captcha.wait_for_captcha(driver, timeout=15)
         captcha_info = self.tencent_captcha.get_info(driver)
+        _mode_label = {"point_click": "点选", "slider": "滑块", "unknown": "未知"}
         logging.info(
             "本地验证码检测: 类型=%s, 提示=%s",
-            captcha_info.get("mode"),
+            _mode_label.get(captcha_info.get("mode"), captcha_info.get("mode")),
             captcha_info.get("prompt", ""),
         )
 
@@ -386,12 +387,12 @@ class DataFetcher:
 
     @ErrorWatcher.watch
     def _login(self, driver, phone_code = False):
-        logging.info(f"开始登录流程, 账号: {self._username}, 手机验证码模式: {phone_code}")
+        logging.info(f"开始登录流程, 账号: {self._username}, 手机验证码模式: {'是' if phone_code else '否'}")
         try:
             driver.get(LOGIN_URL)
             WebDriverWait(driver, self.DRIVER_IMPLICITY_WAIT_TIME * 3).until(EC.visibility_of_element_located((By.CLASS_NAME, "user")))
         except:
-            logging.debug(f"Login failed, open URL: {LOGIN_URL} failed.")
+            logging.debug(f"打开登录页面失败: {LOGIN_URL}")
         logging.info(f"已打开登录页面: {LOGIN_URL}")
         time.sleep(self._step_wait * 2)
         # swtich to username-password login page
@@ -417,15 +418,15 @@ class DataFetcher:
             self._click_button(driver, By.XPATH, '//*[@id="login_box"]/div[1]/div[1]/div[3]/span')
             input_elements = driver.find_elements(By.CLASS_NAME, "el-input__inner")
             input_elements[2].send_keys(self._username)
-            logging.info(f"input_elements username : {self._username}\r")
+            logging.info(f"已输入手机号: {self._username}")
             self._click_button(driver, By.XPATH, '//*[@id="login_box"]/div[2]/div[2]/form/div[1]/div[2]/div[2]/div/a')
             code = input("Input your phone verification code: ")
             input_elements[3].send_keys(code)
-            logging.info(f"input_elements verification code: {code}.\r")
+            logging.info(f"已输入手机验证码: {code}")
             # click login button
             self._click_button(driver, By.XPATH, '//*[@id="login_box"]/div[2]/div[2]/form/div[2]/div/button/span')
             time.sleep(self._step_wait * 2)
-            logging.info("Click login button.\r")
+            logging.info("已点击登录按钮")
 
             return True
         # 增加判空校验便于测试fallback
@@ -448,7 +449,8 @@ class DataFetcher:
 
                 # Wait for post-login state: success, captcha, or error
                 post_login_state = self._wait_for_post_login_state(driver)
-                logging.info(f"登录后页面状态: {post_login_state}")
+                _state_label = {"success": "成功", "captcha": "验证码", "error": "错误", "timeout": "超时"}
+                logging.info(f"登录后页面状态: {_state_label.get(post_login_state, post_login_state)}")
 
                 if post_login_state == "success":
                     logging.info("密码登录成功!")
@@ -583,14 +585,14 @@ class DataFetcher:
         
         driver.maximize_window() 
         time.sleep(self._step_wait)
-        logging.info("Webdriver initialized.")
+        logging.info("WebDriver 已就绪")
         updator = SensorUpdator()
         
         try:
             login_method = os.getenv("LOGIN_METHOD", "password").lower()
             if login_method == "qrcode":
                 # 直接扫码登录模式
-                logging.info("LOGIN_METHOD=qrcode, 直接进入扫码登录模式")
+                logging.info("登录方式: 扫码登录")
                 driver.get(LOGIN_URL)
                 WebDriverWait(driver, self.DRIVER_IMPLICITY_WAIT_TIME * 3).until(
                     EC.visibility_of_element_located((By.CLASS_NAME, "user")))
@@ -601,19 +603,19 @@ class DataFetcher:
                     raise Exception("扫码登录失败")
             elif os.getenv("DEBUG_MODE", "false").lower() == "true":
                 if self._login(driver,phone_code=True):
-                    logging.info("login successed !")
+                    logging.info("登录成功")
                 else:
-                    logging.info("login unsuccessed !")
-                    raise Exception("login unsuccessed")
+                    logging.info("登录失败")
+                    raise Exception("登录失败")
             else:
                 if self._login(driver):
-                    logging.info("login successed !")
+                    logging.info("登录成功")
                 else:
-                    logging.info("login unsuccessed !")
-                    raise Exception("login unsuccessed")
+                    logging.info("登录失败")
+                    raise Exception("登录失败")
         except Exception as e:
             logging.error(
-                f"Webdriver quit abnormly, reason: {e}. {self.RETRY_TIMES_LIMIT} retry times left.")
+                f"浏览器异常退出: {e}，剩余重试次数 {self.RETRY_TIMES_LIMIT}")
             driver.quit()
             return
 
@@ -678,7 +680,7 @@ class DataFetcher:
                     logging.info(f"用户 {user_id} 数据获取失败: {e}, 继续处理下一个用户")
                 else:
                     logging.info(f"用户 {user_id} 数据获取失败: {e}")
-                    logging.info("Webdriver quit after fetching data successfully.")
+                    logging.info("数据获取完成后关闭浏览器")
                 continue
 
         logging.info("所有用户数据处理完成, 关闭浏览器")
@@ -1420,7 +1422,7 @@ class DataFetcher:
             else:
                 return float(balance)
         except Exception as e:
-            logging.error(f"Failed to get balance: {e}")
+            logging.error(f"获取余额失败: {e}")
             return None
 
     def _get_yearly_data(self, driver):
@@ -1438,20 +1440,20 @@ class DataFetcher:
             target = driver.find_element(By.CLASS_NAME, "total")
             WebDriverWait(driver, self.DRIVER_IMPLICITY_WAIT_TIME).until(EC.visibility_of(target))
         except Exception as e:
-            logging.error(f"The yearly data get failed : {e}")
+            logging.error(f"获取年度数据失败: {e}")
             return None, None
 
         # get data
         try:
             yearly_usage = driver.find_element(By.XPATH, "//ul[@class='total']/li[1]/span").text
         except Exception as e:
-            logging.error(f"The yearly_usage data get failed : {e}")
+            logging.error(f"获取年度用电量失败: {e}")
             yearly_usage = None
 
         try:
             yearly_charge = driver.find_element(By.XPATH, "//ul[@class='total']/li[2]/span").text
         except Exception as e:
-            logging.error(f"The yearly_charge data get failed : {e}")
+            logging.error(f"获取年度电费失败: {e}")
             yearly_charge = None
 
         return yearly_usage, yearly_charge
@@ -1510,7 +1512,7 @@ class DataFetcher:
                 charge.append(month_element[i][2])
             return month, usage, charge
         except Exception as e:
-            logging.error(f"The month data get failed : {e}")
+            logging.error(f"获取月度数据失败: {e}")
             return None,None,None
 
     # 增加获取每日用电量的函数
@@ -1612,7 +1614,7 @@ class DataFetcher:
             try:
                 self._click_button(driver, By.XPATH,
                     "//*[@id='pane-second']//label[1]//span[@class='el-radio__input']")
-                logging.info("已点击 '近7天' (fallback)")
+                logging.info("已点击「近7天」（备用方式）")
             except Exception:
                 logging.debug("未找到 '近7天' radio, 使用默认数据")
 
@@ -1628,7 +1630,7 @@ class DataFetcher:
             try:
                 self._click_button(driver, By.XPATH,
                     "//*[@id='pane-second']//label[2]//span[@class='el-radio__input']")
-                logging.info("已点击 '近30天' (fallback)")
+                logging.info("已点击「近30天」（备用方式）")
             except Exception:
                 logging.warning("未找到 '近30天' radio, 使用默认数据")
 

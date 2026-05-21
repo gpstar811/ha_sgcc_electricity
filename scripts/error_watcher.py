@@ -101,7 +101,7 @@ class ErrorWatcher:
         """
         driver = options.get('driver', self.driver)
         if not driver:
-            logging.error("No driver set for taking screenshots.")
+            logging.error("未设置 WebDriver，无法截图")
             return
 
         error_message = str(error)
@@ -110,9 +110,9 @@ class ErrorWatcher:
         
         try:
             self.driver.save_screenshot(screenshot_path)
-            logging.error(f"Error occurred: {error_message}. Screenshot saved to {screenshot_path}")
+            logging.error(f"发生错误: {error_message}，截图已保存至 {screenshot_path}")
         except Exception as e:
-            logging.error(f"Failed to save screenshot: {e}")
+            logging.error(f"截图保存失败: {e}")
             # do not raise the exception here to avoid masking the original error
         finally:
             pass
