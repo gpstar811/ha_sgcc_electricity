@@ -44,6 +44,7 @@ class TencentCaptchaHandler:
             return driver.execute_script(
                 """
                 const selectors = [
+                  '#tCaptchaDyContent',
                   '.tencent-captcha-dy__warp',
                   '.tencent-captcha-dy__wrapper',
                   '.tencent-captcha__wrapper',
@@ -51,6 +52,8 @@ class TencentCaptchaHandler:
                   '.tencent-captcha-dy__image-area',
                   '.tencent-captcha-dy__verify-bg',
                   '.tencent-captcha-dy__verify-bg-img',
+                  '.tencent-captcha-dy__verify-slider-area',
+                  '.tencent-captcha-dy__slider-groove',
                   '[class*="tencent-captcha-dy__content"]'
                 ];
                 const visible = (el, doc) => {
@@ -139,6 +142,14 @@ class TencentCaptchaHandler:
         except Exception:
             return None
 
+    def wait_for_captcha(self, driver, timeout=15) -> bool:
+        """等待验证码容器出现。"""
+        try:
+            WebDriverWait(driver, timeout).until(lambda d: self.has_captcha(d))
+            return True
+        except Exception:
+            return False
+
     def get_info(self, driver):
         try:
             return driver.execute_script(
@@ -150,8 +161,12 @@ class TencentCaptchaHandler:
                     const doc = docs.pop();
                     if (!doc || seen.has(doc)) continue;
                     seen.add(doc);
-                    const el = doc.querySelector(selector);
-                    if (el) return (el.innerText || el.textContent || '').trim();
+                    const els = doc.querySelectorAll(selector);
+                    for (const el of els) {
+                      if (el.offsetParent !== null) {
+                        return (el.innerText || el.textContent || '').trim();
+                      }
+                    }
                     Array.from(doc.querySelectorAll('iframe,frame')).forEach((frame) => {
                       try {
                         if (frame.contentDocument) docs.push(frame.contentDocument);
@@ -167,7 +182,10 @@ class TencentCaptchaHandler:
                     const doc = docs.pop();
                     if (!doc || seen.has(doc)) continue;
                     seen.add(doc);
-                    if (doc.querySelector(selector)) return true;
+                    const els = doc.querySelectorAll(selector);
+                    for (const el of els) {
+                      if (el.offsetParent !== null) return true;
+                    }
                     Array.from(doc.querySelectorAll('iframe,frame')).forEach((frame) => {
                       try {
                         if (frame.contentDocument) docs.push(frame.contentDocument);
@@ -184,19 +202,63 @@ class TencentCaptchaHandler:
                   textOf('.tencent-captcha-dy__sub-title') ||
                   textOf('.tencent-captcha__sub-title') ||
                   '';
+
+                if (/拖动|拼图|滑块/i.test(prompt)) {
+                  return { mode: 'slider', prompt };
+                }
+                if (exists('.tencent-captcha-dy__slider-groove') ||
+                    exists('.tencent-captcha-dy__verify-slider-area')) {
+                  return { mode: 'slider', prompt };
+                }
+
                 const hasPointClick =
-                  /依次点击|顺序点击|点击下图|文字点选|请点击/i.test(prompt) ||
+                  /依次点击|顺序点击|点击下图|文字点选|请点击|点击/i.test(prompt) ||
                   exists('.tencent-captcha-dy__click-type-wrap') ||
                   exists('.tencent-captcha-dy__click-word') ||
                   exists('.tencent-captcha-dy__point-area') ||
-                  exists('.tencent-captcha-dy__word-content');
-                let mode = 'unknown';
-                if (hasPointClick) mode = 'point_click';
-                return { mode, prompt };
+                  exists('.tencent-captcha-dy__word-content') ||
+                  exists('.tencent-captcha-dy__header-answer img') ||
+                  exists('.tencent-captcha-dy__header-answer');
+                if (hasPointClick) {
+                  return { mode: 'point_click', prompt };
+                }
+                return { mode: 'unknown', prompt };
                 """
             ) or {"mode": "unknown", "prompt": ""}
         except Exception as exc:
             return {"mode": "unknown", "prompt": "", "error": str(exc)}
+
+    def refresh_captcha(self, driver) -> bool:
+        """多策略刷新验证码（对齐上游）。"""
+        if self._click_point_click_refresh(driver):
+            return True
+        try:
+            btn = driver.find_element(By.CSS_SELECTOR, ".tencent-captcha-dy__footer-icon--refresh")
+            if btn.is_displayed():
+                driver.execute_script("arguments[0].click();", btn)
+                logging.info("已通过标准刷新按钮刷新验证码")
+                time.sleep(random.uniform(0.8, 1.4))
+                return True
+        except Exception:
+            pass
+        try:
+            driver.execute_script(
+                """
+                var els = document.querySelectorAll('[class*="refresh"], [class*="footer-icon"]');
+                for (var i = 0; i < els.length; i++) {
+                    if (els[i].offsetParent !== null && els[i].getBoundingClientRect().width > 5) {
+                        els[i].click();
+                        return true;
+                    }
+                }
+                return false;
+                """
+            )
+            logging.info("已通过 JS 回退方式刷新验证码")
+            time.sleep(random.uniform(0.8, 1.4))
+            return True
+        except Exception:
+            return False
 
     def _click_point_click_refresh(self, driver) -> bool:
         try:

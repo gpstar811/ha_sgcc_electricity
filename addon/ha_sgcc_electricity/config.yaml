@@ -19,6 +19,8 @@ options:
   hass_token: ""
   job_start_time: "07:00"
   run_on_startup: false
+  captcha_solver: "local"
+  ark_api_key: ""
   retry_wait_time_offset_unit: 10
   data_retention_days: 365
   daily_fetch_days: 7
@@ -37,6 +39,8 @@ schema:
   hass_token: password
   job_start_time: str
   run_on_startup: bool
+  captcha_solver: list(local|llm)
+  ark_api_key: password?
   retry_wait_time_offset_unit: int(2,30)
   data_retention_days: int(0,3650)
   daily_fetch_days: list(7|30)

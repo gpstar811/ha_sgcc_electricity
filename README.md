@@ -114,6 +114,8 @@ Docker Compose 方式通过 `.env` 文件配置，完整配置项见 `example.en
 | `LOGIN_FALLBACK` | qrcode | 登录失败备选（qrcode / none） |
 | `JOB_START_TIME` | `07:00` | 每天同步开始时间 |
 | `RUN_ON_STARTUP` | `false` | Docker 启动后立即登录抓取，不等待定时任务 |
+| `CAPTCHA_SOLVER` | `local` | 验证码识别：`local` 本地 OCR / `llm` 豆包大模型 |
+| `ARK_API_KEY` | — | 火山引擎 API Key（`CAPTCHA_SOLVER=llm` 时必填） |
 | `DB_TYPE` | none | 数据库类型（none / sqlite / mysql） |
 | `DAILY_FETCH_DAYS` | 7 | 每次获取日用电量天数（7 或 30） |
 | `DATA_RETENTION_DAYS` | 365 | 数据库记录保留天数 |

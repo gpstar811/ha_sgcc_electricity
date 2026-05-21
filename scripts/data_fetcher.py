@@ -2,6 +2,7 @@ import logging
 import os
 import re
 import shutil
+import json
 import time
 
 import random
@@ -39,6 +40,11 @@ class DataFetcher:
         self._password = password
 
         self.tencent_captcha = TencentCaptchaHandler()
+        self._captcha_solver = os.getenv("CAPTCHA_SOLVER", "local").lower()
+        if self._captcha_solver not in ("local", "llm"):
+            logging.warning("CAPTCHA_SOLVER 无效值 '%s'，回退为 local", self._captcha_solver)
+            self._captcha_solver = "local"
+        logging.info("验证码识别模式: %s", "LLM 大模型" if self._captcha_solver == "llm" else "本地 OCR/图像匹配")
 
         self.DRIVER_IMPLICITY_WAIT_TIME = int(os.getenv("DRIVER_IMPLICITY_WAIT_TIME", 60))
         self.RETRY_TIMES_LIMIT = int(os.getenv("RETRY_TIMES_LIMIT", 5))
@@ -102,9 +108,9 @@ class DataFetcher:
     // navigator.webdriver
     Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
 
-    // languages & platform
-    Object.defineProperty(navigator, 'languages', {get: () => ['zh-CN','zh','en-US','en']});
-    Object.defineProperty(navigator, 'platform', {get: () => 'Win32'});
+    # languages & platform（运行时由 _get_stealth_js 注入）
+    Object.defineProperty(navigator, 'languages', {get: () => __NAV_LANGUAGES__});
+    Object.defineProperty(navigator, 'platform', {get: () => '__NAV_PLATFORM__'});
 
     // plugins (模拟有真实插件)
     Object.defineProperty(navigator, 'plugins', {
@@ -185,6 +191,32 @@ class DataFetcher:
     """
 
     @staticmethod
+    def _get_stealth_js() -> str:
+        """按运行环境生成 CDP 反检测脚本，避免 Linux Docker 伪装成 Win32。"""
+        if platform.system() == "Windows":
+            nav_platform = "Win32"
+            languages = ["zh-CN", "zh", "en-US", "en"]
+        else:
+            nav_platform = os.getenv("BROWSER_NAV_PLATFORM", "Linux x86_64")
+            lang_env = os.getenv("BROWSER_LANGUAGE", "zh-CN,zh,en-US,en")
+            languages = [part.strip() for part in lang_env.split(",") if part.strip()]
+        langs_json = json.dumps(languages, ensure_ascii=False)
+        return DataFetcher._STEALTH_JS.replace("__NAV_LANGUAGES__", langs_json).replace(
+            "__NAV_PLATFORM__", nav_platform
+        )
+
+    @staticmethod
+    def _inject_stealth_cdp(driver) -> None:
+        try:
+            driver.execute_cdp_cmd(
+                "Page.addScriptToEvaluateOnNewDocument",
+                {"source": DataFetcher._get_stealth_js()},
+            )
+            logging.info("已注入反 webdriver 检测脚本 (CDP)")
+        except Exception as exc:
+            logging.warning("CDP 注入失败 (非致命): %s", exc)
+
+    @staticmethod
     def _human_delay(min_s=0.3, max_s=1.2):
         """生成随机人类行为延迟"""
         time.sleep(random.uniform(min_s, max_s))
@@ -198,15 +230,75 @@ class DataFetcher:
 
     @staticmethod
     def _find_chromedriver() -> ChromeService:
-        """Linux 桌面环境查找 chromedriver，找不到则交给 Selenium Manager。"""
+        """Linux 桌面环境查找 chromedriver（含 CloakBrowser 缓存）。"""
         path = shutil.which("chromedriver") or shutil.which("chromedriver.exe")
         if path:
             return ChromeService(executable_path=path)
+
+        for base in [
+            os.path.expanduser("~/.cloakbrowser"),
+            os.path.join(os.environ.get("LOCALAPPDATA", ""), ".cloakbrowser"),
+        ]:
+            if not base or not os.path.isdir(base):
+                continue
+            try:
+                for root, dirs, files in os.walk(base):
+                    fname = "chromedriver.exe" if "chromedriver.exe" in files else (
+                        "chromedriver" if "chromedriver" in files else None
+                    )
+                    if fname:
+                        candidate = os.path.join(root, fname)
+                        if os.path.isfile(candidate):
+                            return ChromeService(executable_path=candidate)
+                    if root.count(os.sep) - base.count(os.sep) > 2:
+                        dirs.clear()
+            except Exception:
+                pass
+
         try:
             return ChromeService()
         except Exception:
             pass
         raise RuntimeError("ChromeDriver 未找到，请安装 chromedriver 或 chromium-driver")
+
+    @staticmethod
+    def _build_chrome_options(in_docker: bool) -> tuple:
+        """构建 Chrome 反检测参数（对齐 upstream 精华 + 保留 CDP 伪装）。"""
+        browser_window_size = os.getenv("BROWSER_WINDOW_SIZE", "1158,848")
+        browser_language = os.getenv("BROWSER_LANGUAGE", "zh-HK,zh,en-US,en,zh-CN")
+        browser_ua = os.getenv("BROWSER_USER_AGENT", "").strip()
+        browser_device_scale_factor = os.getenv("BROWSER_DEVICE_SCALE_FACTOR", "2")
+        browser_language_primary = browser_language.split(",")[0].strip()
+
+        if in_docker and not browser_ua:
+            browser_ua = (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36"
+            )
+
+        chrome_options = webdriver.ChromeOptions()
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--start-maximized")
+        chrome_options.add_argument(f"--window-size={browser_window_size}")
+        chrome_options.add_argument(f"--lang={browser_language_primary}")
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option("useAutomationExtension", False)
+        if browser_ua:
+            chrome_options.add_argument(f"user-agent={browser_ua}")
+        chrome_options.add_argument(f"--force-device-scale-factor={browser_device_scale_factor}")
+        chrome_options.add_argument("--high-dpi-support=1")
+        chrome_options.add_experimental_option(
+            "prefs",
+            {
+                "intl.accept_languages": browser_language,
+                "credentials_enable_service": False,
+                "profile.password_manager_enabled": False,
+            },
+        )
+        return chrome_options, browser_language_primary
 
     def _get_webdriver(self):
         logging.info(f"正在初始化 WebDriver, 平台: {platform.system()}")
@@ -229,57 +321,11 @@ class DataFetcher:
                 options=edge_options
             )
             driver.implicitly_wait(self.DRIVER_IMPLICITY_WAIT_TIME)
-
-            # Windows 也注入反检测脚本
-            try:
-                driver.execute_cdp_cmd(
-                    "Page.addScriptToEvaluateOnNewDocument",
-                    {"source": self._STEALTH_JS},
-                )
-                logging.info("已注入反 webdriver 检测脚本 (CDP)")
-            except Exception as e:
-                logging.warning(f"CDP 注入失败 (非致命): {e}")
+            self._inject_stealth_cdp(driver)
         else:
-            # --- Docker / Linux 环境（对齐 upstream headless 方案）---
-            browser_window_size = os.getenv("BROWSER_WINDOW_SIZE", "1158,848")
-            browser_language = os.getenv("BROWSER_LANGUAGE", "zh-HK,zh,en-US,en,zh-CN")
-            browser_ua = os.getenv(
-                "BROWSER_USER_AGENT",
-                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
-                "(KHTML, like Gecko) Chrome/136.0.0.0 Safari/537.36",
-            )
-            browser_device_scale_factor = float(os.getenv("BROWSER_DEVICE_SCALE_FACTOR", "2"))
-            browser_language_primary = browser_language.split(",")[0]
-
-            chrome_options = webdriver.ChromeOptions()
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-gpu")
-            chrome_options.add_argument("--disable-dev-shm-usage")
-            chrome_options.add_argument("--start-maximized")
-            chrome_options.add_argument(f"--window-size={browser_window_size}")
-            chrome_options.add_argument(f"--lang={browser_language_primary}")
-
-            # 禁用自动化标记
-            chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-            chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            chrome_options.add_experimental_option("useAutomationExtension", False)
-
-            chrome_options.add_argument(f"user-agent={browser_ua}")
-            chrome_options.add_argument(f"--force-device-scale-factor={browser_device_scale_factor}")
-            chrome_options.add_argument("--high-dpi-support=1")
-
-            chrome_options.add_experimental_option(
-                "prefs",
-                {
-                    "intl.accept_languages": browser_language,
-                    "credentials_enable_service": False,
-                    "profile.password_manager_enabled": False,
-                },
-            )
-
             in_docker = "PYTHON_IN_DOCKER" in os.environ
+            chrome_options, _ = self._build_chrome_options(in_docker)
             if in_docker:
-                # Docker 无显示服务器，必须用 headless=new（Xvfb 有头模式会崩溃）
                 chrome_options.add_argument("--headless=new")
                 chrome_options.binary_location = "/usr/bin/chromium"
                 service = ChromeService(executable_path="/usr/bin/chromedriver")
@@ -288,24 +334,61 @@ class DataFetcher:
                 service = self._find_chromedriver()
                 logging.info("使用 Chrome 浏览器 (Linux 桌面模式)")
 
-            driver = webdriver.Chrome(
-                options=chrome_options,
-                service=service,
-            )
+            driver = webdriver.Chrome(options=chrome_options, service=service)
             driver.implicitly_wait(self.DRIVER_IMPLICITY_WAIT_TIME)
-
-            # 注入反 webdriver 检测脚本 (CDP)
-            try:
-                driver.execute_cdp_cmd(
-                    "Page.addScriptToEvaluateOnNewDocument",
-                    {"source": self._STEALTH_JS},
-                )
-                logging.info("已注入反 webdriver 检测脚本 (CDP)")
-            except Exception as e:
-                logging.warning(f"CDP 注入失败 (非致命): {e}")
+            self._inject_stealth_cdp(driver)
 
         logging.info("WebDriver 初始化完成")
         return driver
+
+    def _solve_captcha_local(self, driver) -> bool:
+        """本地 OCR/图像匹配解算验证码。"""
+        self.tencent_captcha.wait_for_captcha(driver, timeout=15)
+        captcha_info = self.tencent_captcha.get_info(driver)
+        logging.info(
+            "本地验证码检测: 类型=%s, 提示=%s",
+            captcha_info.get("mode"),
+            captcha_info.get("prompt", ""),
+        )
+
+        if captcha_info.get("mode") == "slider":
+            logging.info("本地模式不支持滑块，尝试刷新获取点选验证码...")
+            for i in range(1, 6):
+                self.tencent_captcha.refresh_captcha(driver)
+                self._human_delay(1.5, 2.5)
+                captcha_info = self.tencent_captcha.get_info(driver)
+                logging.info("刷新 #%s 后验证码类型: %s", i, captcha_info.get("mode"))
+                if captcha_info.get("mode") == "point_click":
+                    break
+            if captcha_info.get("mode") != "point_click":
+                logging.error("刷新后仍为滑块/未知类型，本地模式无法处理")
+                return False
+
+        if captcha_info.get("mode") not in ("point_click", "unknown"):
+            logging.error("未支持的验证码类型: %s", captcha_info.get("mode"))
+            return False
+
+        for retry_times in range(1, self.RETRY_TIMES_LIMIT + 1):
+            logging.info("开始第 %s 次本地点选验证码识别...", retry_times)
+            if self.tencent_captcha.solve_point_click_captcha(driver, self.DRIVER_IMPLICITY_WAIT_TIME):
+                if driver.current_url != LOGIN_URL or not self.tencent_captcha.has_captcha(driver):
+                    return True
+            logging.info("第 %s 次本地点选验证码识别失败, 正在刷新...", retry_times)
+            self.tencent_captcha.refresh_captcha(driver)
+            self._human_delay(1.0, 2.5)
+        return False
+
+    def _solve_captcha(self, driver) -> bool:
+        """根据 CAPTCHA_SOLVER 环境变量选择 LLM 或本地识别。"""
+        if self._captcha_solver == "llm":
+            logging.info("使用 LLM 大模型识别验证码")
+            from captcha_solver.browser_llm import solve_captcha_in_browser
+            try:
+                return solve_captcha_in_browser(driver, max_retries=self.RETRY_TIMES_LIMIT)
+            except RuntimeError as exc:
+                logging.error("LLM 验证码初始化失败: %s", exc)
+                return False
+        return self._solve_captcha_local(driver)
 
     @ErrorWatcher.watch
     def _login(self, driver, phone_code = False):
@@ -378,22 +461,11 @@ class DataFetcher:
                     return True
 
                 if post_login_state == "captcha":
-                    captcha_info = self.tencent_captcha.get_info(driver)
-                    logging.info(
-                        f"检测到验证码: 类型={captcha_info.get('mode')}, 提示文字={captcha_info.get('prompt', '')}"
-                    )
-                    if captcha_info.get("mode") == "point_click":
-                        for retry_times in range(1, self.RETRY_TIMES_LIMIT + 1):
-                            logging.info(f"开始第 {retry_times} 次点选验证码识别...")
-                            if self.tencent_captcha.solve_point_click_captcha(driver, self.DRIVER_IMPLICITY_WAIT_TIME):
-                                time.sleep(self._step_wait)
-                                if driver.current_url != LOGIN_URL:
-                                    logging.info("点选验证码识别成功, 已通过验证!")
-                                    return True
-                            logging.info(f"第 {retry_times} 次点选验证码识别失败, 正在刷新验证码...")
-                            self.tencent_captcha._click_point_click_refresh(driver)
-                            self._human_delay(1.0, 2.5)
-
+                    if self._solve_captcha(driver):
+                        time.sleep(self._step_wait)
+                        if driver.current_url != LOGIN_URL:
+                            logging.info("验证码识别成功, 已通过验证!")
+                            return True
                     logging.error("验证码识别多次失败, 尝试备选登录方案")
                     return self._fallback_login(driver)
                 elif post_login_state == "error":

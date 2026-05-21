@@ -1,1 +1,1 @@
-"""Captcha solvers: point-click image matching and Tencent-specific DOM adapter."""
+"""Captcha solvers: local OCR/image matching, LLM vision, and Tencent DOM adapter."""
