@@ -7,6 +7,7 @@ import time
 from io import BytesIO
 from pathlib import Path
 
+import requests
 from PIL import Image
 from selenium.webdriver import ActionChains
 from selenium.webdriver.common.by import By
@@ -19,7 +20,7 @@ from captcha_solver.image import PointClickImageSolver, capture_element_image
 class TencentCaptchaHandler:
     """Tencent point-click captcha handler for 95598 login."""
 
-    POINT_CLICK_MAX_REFRESHES = 2
+    POINT_CLICK_MAX_REFRESHES = 3
 
     def __init__(self, trace_dir=None):
         if trace_dir is None:
@@ -314,6 +315,75 @@ class TencentCaptchaHandler:
             logging.info("Failed to click refresh button: %s", exc)
         return False
 
+    @staticmethod
+    def _load_image_from_element(driver, element) -> Image.Image:
+        """优先从 img src 下载原图，截图作为回退（Docker headless 更清晰）。"""
+        src = (element.get_attribute("src") or "").strip()
+        if src.startswith("http"):
+            try:
+                resp = requests.get(src, timeout=15)
+                if resp.status_code == 200 and resp.content:
+                    return Image.open(BytesIO(resp.content)).convert("RGB")
+            except Exception as exc:
+                logging.info("从 URL 下载验证码图片失败，回退截图: %s", exc)
+        elif src.startswith("data:image"):
+            try:
+                import base64
+
+                encoded = src.split(",", 1)[1]
+                return Image.open(BytesIO(base64.b64decode(encoded))).convert("RGB")
+            except Exception as exc:
+                logging.info("解析 data URI 验证码图片失败，回退截图: %s", exc)
+        return Image.open(BytesIO(capture_element_image(driver, element))).convert("RGB")
+
+    @staticmethod
+    def _click_with_offset(driver, element, x_offset: int, y_offset: int) -> None:
+        try:
+            ActionChains(driver).move_to_element_with_offset(
+                element, x_offset, y_offset
+            ).pause(random.uniform(0.05, 0.15)).click().perform()
+        except Exception:
+            driver.execute_script(
+                "var r = arguments[0].getBoundingClientRect();"
+                "var cx = r.left + r.width/2 + arguments[1];"
+                "var cy = r.top + r.height/2 + arguments[2];"
+                "var el = document.elementFromPoint(cx, cy);"
+                "if (el) {"
+                "  ['pointerdown','mousedown','pointerup','mouseup','click'].forEach(function(t){"
+                "    el.dispatchEvent(new MouseEvent(t, {bubbles:true, cancelable:true, clientX:cx, clientY:cy}));"
+                "  });"
+                "}",
+                element,
+                x_offset,
+                y_offset,
+            )
+
+    def _try_click_solution(self, driver, bg_element, bg_image, points) -> bool:
+        bg_rect = bg_element.rect
+        x_scale = bg_rect["width"] / max(bg_image.width, 1)
+        y_scale = bg_rect["height"] / max(bg_image.height, 1)
+        for x, y, _score in points:
+            x_offset = int((x * x_scale) - (bg_rect["width"] / 2))
+            y_offset = int((y * y_scale) - (bg_rect["height"] / 2))
+            self._click_with_offset(driver, bg_element, x_offset, y_offset)
+            time.sleep(random.uniform(0.25, 0.55))
+
+        try:
+            confirm = WebDriverWait(driver, 5).until(
+                EC.presence_of_element_located(
+                    (By.CSS_SELECTOR, ".tencent-captcha-dy__verify-confirm-btn")
+                )
+            )
+            WebDriverWait(driver, 5).until(
+                lambda _d: "disabled" not in (confirm.get_attribute("class") or "")
+            )
+            driver.execute_script("arguments[0].click();", confirm)
+        except Exception:
+            logging.info("Confirm button not found, points may auto-submit.")
+
+        time.sleep(random.uniform(1.5, 2.5))
+        return not self.has_captcha(driver)
+
     def solve_point_click_captcha(self, driver, wait_time=60) -> bool:
         """Solve a Tencent point-click captcha. Returns True on success."""
         answer_image = None
@@ -355,22 +425,23 @@ class TencentCaptchaHandler:
                     return False
 
                 answer_image = self._point_click_solver.trim_nonwhite_border(
-                    Image.open(BytesIO(capture_element_image(driver, answer_element))).convert("RGB"),
+                    self._load_image_from_element(driver, answer_element),
                     threshold=245,
                     padding=4,
                 )
-                bg_image = Image.open(BytesIO(capture_element_image(driver, bg_element))).convert("RGB")
+                bg_image = self._load_image_from_element(driver, bg_element)
 
                 # Save debug images
                 self._save_debug_images(answer_image, bg_image, f"attempt_{attempt}")
 
+                solution_limit = int(os.getenv("CAPTCHA_LOCAL_SOLUTION_CANDIDATES", "3"))
                 solutions = self._point_click_solver.ranked_solutions_from_images(
                     answer_image,
                     bg_image,
-                    limit=1,
-                    min_average_score=float(os.getenv("CAPTCHA_MIN_AVG_SCORE", "0.42")),
-                    min_point_score=float(os.getenv("CAPTCHA_MIN_POINT_SCORE", "0.20")),
-                    min_score_gap=float(os.getenv("CAPTCHA_MIN_SCORE_GAP", "0.005")),
+                    limit=solution_limit,
+                    min_average_score=float(os.getenv("CAPTCHA_MIN_AVG_SCORE", "0.38")),
+                    min_point_score=float(os.getenv("CAPTCHA_MIN_POINT_SCORE", "0.18")),
+                    min_score_gap=float(os.getenv("CAPTCHA_MIN_SCORE_GAP", "0.003")),
                 )
 
                 if not solutions:
@@ -379,48 +450,28 @@ class TencentCaptchaHandler:
                         continue
                     return False
 
-                average_score, points = solutions[0]
-                logging.info(
-                    "Point-click solution: points=%s average_score=%.3f",
-                    [(round(x, 1), round(y, 1), round(s, 3)) for x, y, s in points],
-                    average_score,
-                )
-
-                # Click each point
-                bg_rect = bg_element.rect
-                x_scale = bg_rect["width"] / bg_image.width
-                y_scale = bg_rect["height"] / bg_image.height
-                for x, y, _score in points:
-                    x_offset = int((x * x_scale) - (bg_rect["width"] / 2))
-                    y_offset = int((y * y_scale) - (bg_rect["height"] / 2))
-                    ActionChains(driver).move_to_element_with_offset(
-                        bg_element, x_offset, y_offset
-                    ).pause(random.uniform(0.05, 0.15)).click().perform()
-                    time.sleep(random.uniform(0.25, 0.55))
-
-                # Click confirm button
-                try:
-                    confirm = WebDriverWait(driver, 5).until(
-                        EC.presence_of_element_located(
-                            (By.CSS_SELECTOR, ".tencent-captcha-dy__verify-confirm-btn")
+                for solution_index, (average_score, points) in enumerate(solutions, start=1):
+                    logging.info(
+                        "Point-click solution #%s: points=%s average_score=%.3f",
+                        solution_index,
+                        [(round(x, 1), round(y, 1), round(s, 3)) for x, y, s in points],
+                        average_score,
+                    )
+                    if self._try_click_solution(driver, bg_element, bg_image, points):
+                        logging.info(
+                            "Point-click captcha solved on attempt %s solution #%s.",
+                            attempt,
+                            solution_index,
                         )
+                        self._save_debug_images(answer_image, bg_image, f"success_{attempt}_{solution_index}")
+                        return True
+                    logging.info(
+                        "Point-click solution #%s failed on attempt %s, trying next candidate.",
+                        solution_index,
+                        attempt,
                     )
-                    WebDriverWait(driver, 5).until(
-                        lambda _d: "disabled" not in (confirm.get_attribute("class") or "")
-                    )
-                    driver.execute_script("arguments[0].click();", confirm)
-                except Exception:
-                    logging.info("Confirm button not found, points may auto-submit.")
 
-                time.sleep(random.uniform(1.5, 2.5))
-
-                success = not self.has_captcha(driver)
-                if success:
-                    logging.info("Point-click captcha solved successfully on attempt %s.", attempt)
-                    self._save_debug_images(answer_image, bg_image, f"success_{attempt}")
-                    return True
-
-                logging.info("Point-click captcha failed on attempt %s.", attempt)
+                logging.info("All point-click candidates failed on attempt %s.", attempt)
                 self._save_debug_images(answer_image, bg_image, f"failed_{attempt}")
                 if attempt < self.point_click_max_refreshes and self._click_point_click_refresh(driver):
                     continue
@@ -432,6 +483,9 @@ class TencentCaptchaHandler:
             if answer_image is not None and bg_image is not None:
                 self._save_debug_images(answer_image, bg_image, "exception")
             return False
+
+    def _human_delay(self):
+        time.sleep(random.uniform(0.8, 1.4))
 
     def _save_debug_images(self, answer_image, bg_image, suffix: str) -> None:
         try:

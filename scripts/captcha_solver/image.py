@@ -181,7 +181,7 @@ class PointClickImageSolver:
         mask = self.close_mask(self.dark_mask(answer_image, 135), radius=1)
         xs = np.where(mask.any(axis=0))[0]
         if len(xs) == 0:
-            return []
+            return self._segment_answer_icons_equal_split(answer_image)
 
         segments = []
         start = int(xs[0])
@@ -201,6 +201,23 @@ class PointClickImageSolver:
             area = int(submask.sum())
             if len(ys) and right - left >= 4 and area >= 25:
                 boxes.append((left, int(ys[0]), right, int(ys[-1]) + 1, area))
+        if len(boxes) >= 3:
+            return sorted(boxes, key=lambda item: item[0])[:3]
+        return self._segment_answer_icons_equal_split(answer_image)
+
+    @staticmethod
+    def _segment_answer_icons_equal_split(answer_image: Image.Image):
+        """参考图标条三等分回退（与 LLM 方案一致）。"""
+        width, height = answer_image.size
+        if width < 12 or height < 4:
+            return []
+        part_w = width // 3
+        boxes = []
+        for index in range(3):
+            left = index * part_w
+            right = (index + 1) * part_w if index < 2 else width
+            boxes.append((left, 0, right, height, max(right - left, 1) * height))
+        logging.info("使用三等分回退切分参考图标条: %sx%s", width, height)
         return boxes
 
     @staticmethod
@@ -796,6 +813,13 @@ class PointClickImageSolver:
                 len(target_boxes),
                 len(candidates),
             )
+            ocr_solutions = self._ocr_fallback_solutions(answer_image, bg_image)
+            if ocr_solutions:
+                diagnostics["accepted"] = True
+                diagnostics["rejection_reason"] = "ocr_fallback"
+                diagnostics["solutions"] = ocr_solutions
+                self.last_diagnostics = diagnostics
+                return ocr_solutions
             return []
 
         top_matches = []
@@ -940,8 +964,24 @@ class PointClickImageSolver:
         diagnostics["accepted"] = bool(solutions)
         if not solutions and diagnostics["rejection_reason"] is None:
             diagnostics["rejection_reason"] = "all_solutions_below_threshold"
+            ocr_solutions = self._ocr_fallback_solutions(answer_image, bg_image)
+            if ocr_solutions:
+                diagnostics["accepted"] = True
+                diagnostics["rejection_reason"] = "ocr_fallback"
+                diagnostics["solutions"] = ocr_solutions
+                self.last_diagnostics = diagnostics
+                return ocr_solutions
         self.last_diagnostics = diagnostics
         return solutions
+
+    def _ocr_fallback_solutions(self, answer_image: Image.Image, bg_image: Image.Image):
+        """图像匹配失败时，尝试 ddddocr 文字/数字点选路径。"""
+        candidate_box = (0, 0, bg_image.width, bg_image.height, bg_image.width * bg_image.height)
+        mixed = self.solve_widget_mixed_ocr(answer_image, bg_image, candidate_box)
+        if mixed:
+            logging.info("点选验证码 OCR 混合匹配成功，候选方案 %s 个", len(mixed))
+            return mixed
+        return []
 
     def solve_from_images(self, answer_image: Image.Image, bg_image: Image.Image):
         solutions = self.ranked_solutions_from_images(answer_image, bg_image, limit=1)

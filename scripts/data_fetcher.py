@@ -342,7 +342,7 @@ class DataFetcher:
         return driver
 
     def _solve_captcha_local(self, driver) -> bool:
-        """本地 OCR/图像匹配解算验证码。"""
+        """本地 OCR/图像匹配解算点选验证码。"""
         self.tencent_captcha.wait_for_captcha(driver, timeout=15)
         captcha_info = self.tencent_captcha.get_info(driver)
         logging.info(
@@ -351,21 +351,8 @@ class DataFetcher:
             captcha_info.get("prompt", ""),
         )
 
-        if captcha_info.get("mode") == "slider":
-            logging.info("本地模式不支持滑块，尝试刷新获取点选验证码...")
-            for i in range(1, 6):
-                self.tencent_captcha.refresh_captcha(driver)
-                self._human_delay(1.5, 2.5)
-                captcha_info = self.tencent_captcha.get_info(driver)
-                logging.info("刷新 #%s 后验证码类型: %s", i, captcha_info.get("mode"))
-                if captcha_info.get("mode") == "point_click":
-                    break
-            if captcha_info.get("mode") != "point_click":
-                logging.error("刷新后仍为滑块/未知类型，本地模式无法处理")
-                return False
-
         if captcha_info.get("mode") not in ("point_click", "unknown"):
-            logging.error("未支持的验证码类型: %s", captcha_info.get("mode"))
+            logging.error("当前验证码非点选类型: %s", captcha_info.get("mode"))
             return False
 
         for retry_times in range(1, self.RETRY_TIMES_LIMIT + 1):
@@ -381,12 +368,19 @@ class DataFetcher:
     def _solve_captcha(self, driver) -> bool:
         """根据 CAPTCHA_SOLVER 环境变量选择 LLM 或本地识别。"""
         if self._captcha_solver == "llm":
+            if not os.getenv("ARK_API_KEY", "").strip():
+                logging.error("CAPTCHA_SOLVER=llm 但未配置 ARK_API_KEY")
+                return False
             logging.info("使用 LLM 大模型识别验证码")
             from captcha_solver.browser_llm import solve_captcha_in_browser
             try:
-                return solve_captcha_in_browser(driver, max_retries=self.RETRY_TIMES_LIMIT)
-            except RuntimeError as exc:
-                logging.error("LLM 验证码初始化失败: %s", exc)
+                return solve_captcha_in_browser(
+                    driver,
+                    max_retries=self.RETRY_TIMES_LIMIT,
+                    timeout=min(15, self.DRIVER_IMPLICITY_WAIT_TIME),
+                )
+            except Exception as exc:
+                logging.error("LLM 验证码识别失败: %s", exc)
                 return False
         return self._solve_captcha_local(driver)
 
@@ -551,9 +545,10 @@ class DataFetcher:
             logging.info(f"二维码已保存到 {qr_path}, 请扫描登录")
 
         try:
-            from notify import UrlLoginQrCodeNotify
-            notifyFunc = UrlLoginQrCodeNotify()
-            notifyFunc(img_screenshot)
+            from notify import get_qrcode_notifier
+            notifier = get_qrcode_notifier()
+            if notifier:
+                notifier(img_screenshot)
         except Exception as e:
             logging.warning(f"二维码推送失败 (不影响扫码登录): {e}")
         logging.info(f"等待扫码登录, 最长等待 {self.QR_CODE_LOGIN_WAIT_COUNT * self.QR_CODE_LOGIN_WAIT_TIME_INTERVAL_UNIT} 秒...")

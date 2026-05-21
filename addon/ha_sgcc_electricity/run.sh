@@ -50,6 +50,7 @@ export PUSH_TYPE="$(json_get push_type none)"
 export BALANCE="$(json_get balance 100)"
 export PUSHPLUS_TOKEN="$(json_get pushplus_token "")"
 export PUSH_URL="$(json_get push_url "")"
+export WEWORK_WEBHOOK_URL="$(json_get wework_webhook_url "")"
 export PUSH_QRCODE_URL="$(json_get push_qrcode_url "")"
 
 echo "========================================="

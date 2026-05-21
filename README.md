@@ -121,7 +121,8 @@ Docker Compose 方式通过 `.env` 文件配置，完整配置项见 `example.en
 | `DATA_RETENTION_DAYS` | 365 | 数据库记录保留天数 |
 | `IGNORE_USER_ID` | 空 | 忽略的户号（逗号分隔） |
 | `RETRY_WAIT_TIME_OFFSET_UNIT` | 10 | 页面操作等待秒数（2-30） |
-| `PUSH_TYPE` | none | 通知方式（none / pushplus / urlpush） |
+| `PUSH_TYPE` | none | 通知方式（none / pushplus / urlpush / wework） |
+| `WEWORK_WEBHOOK_URL` | — | 企业微信群机器人 webhook（`PUSH_TYPE=wework` 时必填） |
 | `BALANCE` | 100 | 余额低于此值时通知（元） |
 
 ---

@@ -24,6 +24,9 @@ class SensorUpdator:
         elif push_type == "urlpush":
             from notify import UrlPushNotify
             self.balance_notify = UrlPushNotify()
+        elif push_type == "wework":
+            from notify import WeworkNotify
+            self.balance_notify = WeworkNotify()
         else:
             self.balance_notify = None
         

@@ -58,6 +58,14 @@ def solve_captcha_in_browser(
     """在浏览器中处理验证码，返回是否通过。"""
     selectors = selectors or TENCENT_SELECTORS
     solver = solver or ClickCaptchaSolver()
+    if not solver.api_key:
+        raise RuntimeError("ARK_API_KEY 未设置，无法使用 LLM 验证码识别")
+
+    implicit_wait_backup = None
+    try:
+        implicit_wait_backup = driver.timeouts.implicit_wait
+    except Exception:
+        pass
 
     for attempt in range(max_retries):
         logger.info("验证码尝试 %s/%s", attempt + 1, max_retries)
@@ -72,6 +80,11 @@ def solve_captcha_in_browser(
         if captcha_type == "slider":
             if _solve_slider(driver, selectors):
                 logger.info("滑块验证码已解算")
+                if implicit_wait_backup is not None:
+                    try:
+                        driver.implicitly_wait(implicit_wait_backup)
+                    except Exception:
+                        pass
                 return True
             _refresh_captcha(driver, selectors)
             time.sleep(2)
@@ -89,6 +102,11 @@ def solve_captcha_in_browser(
                 if captcha_type == "slider":
                     if _solve_slider(driver, selectors):
                         logger.info("刷新后滑块已解算")
+                        if implicit_wait_backup is not None:
+                            try:
+                                driver.implicitly_wait(implicit_wait_backup)
+                            except Exception:
+                                pass
                         return True
             if captcha_type != "click":
                 continue
@@ -164,6 +182,11 @@ def solve_captcha_in_browser(
         time.sleep(2)
         if _check_passed(driver, selectors):
             logger.info("验证码已通过")
+            if implicit_wait_backup is not None:
+                try:
+                    driver.implicitly_wait(implicit_wait_backup)
+                except Exception:
+                    pass
             return True
 
         logger.info("未通过，正在刷新...")
@@ -171,6 +194,11 @@ def solve_captcha_in_browser(
         time.sleep(1)
 
     logger.error("所有重试后验证码解算失败")
+    if implicit_wait_backup is not None:
+        try:
+            driver.implicitly_wait(implicit_wait_backup)
+        except Exception:
+            pass
     return False
 
 
@@ -209,10 +237,14 @@ def _solve_slider(driver: WebDriver, selectors: dict) -> bool:
     groove_width = groove.size.get("width", 300)
     logger.info("滑块轨道宽度: %s", groove_width)
 
+    api_key = os.getenv("ARK_API_KEY", "").strip()
+    if not api_key:
+        logger.error("ARK_API_KEY 未设置，无法解算滑块验证码")
+        return False
+
     try:
         from openai import OpenAI
 
-        api_key = os.getenv("ARK_API_KEY", "")
         client = OpenAI(
             base_url=os.getenv("ARK_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3"),
             api_key=api_key,
@@ -462,6 +494,7 @@ def _find_main_image_element(
 ) -> Optional[WebElement]:
     best = None
     best_aspect_diff = float("inf")
+    saved_wait = driver.timeouts.implicit_wait if hasattr(driver, "timeouts") else None
     driver.implicitly_wait(0)
     try:
         for sel in [
@@ -495,7 +528,8 @@ def _find_main_image_element(
             if best and not expected_aspect:
                 break
     finally:
-        driver.implicitly_wait(60)
+        if saved_wait is not None:
+            driver.implicitly_wait(saved_wait)
     return best
 
 

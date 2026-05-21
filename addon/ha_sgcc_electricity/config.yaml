@@ -29,6 +29,7 @@ options:
   balance: 100
   pushplus_token: ""
   push_url: ""
+  wework_webhook_url: ""
   push_qrcode_url: ""
 schema:
   phone_number: str
@@ -45,8 +46,9 @@ schema:
   data_retention_days: int(0,3650)
   daily_fetch_days: list(7|30)
   login_fallback: list(qrcode|none)
-  push_type: list(none|pushplus|urlpush)
+  push_type: list(none|pushplus|urlpush|wework)
   balance: float
   pushplus_token: str?
   push_url: str?
+  wework_webhook_url: str?
   push_qrcode_url: str?
