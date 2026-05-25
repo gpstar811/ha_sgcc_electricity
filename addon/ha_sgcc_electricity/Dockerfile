@@ -1,4 +1,4 @@
-ARG BUILD_FROM=ghcr.nju.edu.cn/gpstar811/ha_sgcc_electricity:latest
+ARG BUILD_FROM=ghcr.nju.edu.cn/poiig/ha_sgcc_electricity:latest
 FROM ${BUILD_FROM}
 
 COPY run.sh /run.sh
