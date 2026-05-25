@@ -647,17 +647,29 @@ class DataFetcher:
                     logging.info(f"用户 {user_id} 在忽略列表中, 跳过")
                     continue
 
-                driver.get(ELECTRIC_USAGE_URL)
-                time.sleep(self._step_wait)
+                # 关键修复：先访问 BALANCE_URL，再切换用户，获取余额后再访问用电量页面
+                # 这样可以确保每个用户获取的是自己的余额，而不是第一个用户的余额
+                driver.get(BALANCE_URL)
+                time.sleep(self._step_wait * 2)
                 logging.info(f"正在切换到用户 [{user_id}]...")
                 if not self._switch_to_user(driver, user_id, userid_index):
                     logging.warning(f"用户 [{user_id}] 切换失败, 跳过")
                     continue
-
+                
+                # 验证用户切换是否成功
                 current_userid = self._get_current_userid(driver)
-                logging.info(f"当前用户: {current_userid}, 开始获取用电数据...")
-                driver.get(BALANCE_URL)
+                if current_userid != user_id:
+                    logging.warning(f"用户 [{user_id}] 切换失败！当前={current_userid}, 重试...")
+                    time.sleep(self._step_wait)
+                    if not self._switch_to_user(driver, user_id, userid_index):
+                        logging.warning(f"用户 [{user_id}] 第二次切换也失败, 跳过")
+                        continue
+                    current_userid = self._get_current_userid(driver)
+                
+                logging.info(f"当前用户: {current_userid}, 开始获取余额数据...")
                 time.sleep(self._step_wait)
+                
+                # 获取余额数据（就在当前页面获取，不要重新访问）
                 balance, last_daily_date, last_daily_usage, yearly_charge, yearly_usage, month_charge, month_usage, tou_data, enhanced_balance, step_data, last_month_period = self._get_all_data(driver, user_id, userid_index)
                 logging.info(f"用户 [{user_id}] 数据获取完成: 余额={balance}CNY, 最近日用电={last_daily_usage}kWh({last_daily_date}), "
                              f"年度用电={yearly_usage}kWh, 年度电费={yearly_charge}CNY, 月用电={month_usage}kWh, 月电费={month_charge}CNY")
