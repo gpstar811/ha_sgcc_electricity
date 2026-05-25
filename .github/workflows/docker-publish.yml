@@ -1,6 +1,8 @@
 name: Build and Push Docker Image
 
 on:
+  push:
+    branches: [ master, main ]
   workflow_dispatch:
     inputs:
       version:
@@ -83,8 +85,6 @@ jobs:
             ghcr.io/${{ steps.vars.outputs.repo_lower }}:${{ steps.vars.outputs.tag }}
           build-args: |
             VERSION=${{ steps.vars.outputs.tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       - name: Build and push to Docker Hub
         if: steps.dockerhub.outputs.enabled == 'true'
@@ -99,8 +99,6 @@ jobs:
             ${{ steps.dockerhub.outputs.image }}:${{ steps.vars.outputs.tag }}
           build-args: |
             VERSION=${{ steps.vars.outputs.tag }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
 
       - name: Update Docker Hub description
         if: steps.dockerhub.outputs.enabled == 'true'
